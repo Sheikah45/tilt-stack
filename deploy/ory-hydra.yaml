@@ -41,6 +41,7 @@ spec:
             - configMapRef:
                 name: ory-hydra
           args: ["migrate", "sql", "--read-from-env", "--yes"]
+          ttlSecondsAfterFinished: "0"
       restartPolicy: OnFailure
 
 ---
@@ -69,7 +70,7 @@ metadata:
   labels:
     app: ory-hydra
 data:
-  URLS_SELF_ISSUER: "http://localhost:4444"
+  URLS_SELF_ISSUER: "http://ory-hydra:4444"
   URLS_LOGIN: "http://localhost:8080/oauth2/login"
   URLS_CONSENT: "http://localhost:8080/oauth2/consent"
   STRATEGIES_ACCESS_TOKEN: "jwt"

@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faf-user-service
+  labels:
+    app: faf-user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: faf-user-service
+  template:
+    metadata:
+      labels:
+        app: faf-user-service
+    spec:
+      containers:
+        - image: faforever/faf-user-service:3.1.3
+          name: faf-user-service
+          envFrom:
+            - configMapRef:
+                name: faf-user-service
+          volumeMounts:
+            - name: mail-templates
+              mountPath: /config/mail/
+              readOnly: true
+          ports:
+            - containerPort: 8080
+      restartPolicy: Always
+      volumes:
+        - name: mail-templates
+          configMap:
+            name: faf-user-service-mail-templates
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: faf-user-service
+  labels:
+    app: faf-user-service
+spec:
+  selector:
+    app: faf-user-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+      
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: faf-user-service
+  labels:
+    app: faf-user-service
+data:
+  FAF_ENVIRONMENT: development
+  PASSWORD_RESET_URL: "https://www.{{.Values.baseDomain}}/account/password/reset"
+  REGISTER_ACCOUNT_URL: "https://www.{{.Values.baseDomain}}/account/register"
+  ACTIVATION_URL_FORMAT: "https://user.{{.Values.baseDomain}}/register/activate?token=%s"
+  FAILED_LOGIN_ACCOUNT_THRESHOLD: "5"
+  FAILED_LOGIN_ATTEMPT_THRESHOLD: "10"
+  FAILED_LOGIN_THROTTLING_MINUTES: "5"
+  FAILED_LOGIN_DAYS_TO_CHECK: "1"
+  HYDRA_TOKEN_ISSUER: "http://ory-hydra:4444/"
+  HYDRA_JWKS_URL: "http://ory-hydra:4444/.well-known/jwks.json"
+  HYDRA_BASE_ADMIN_URL: "http://ory-hydra:4445"
+  DB_URL: "jdbc:mariadb://faf-db:3306/faf?ssl=false"
+  DB_USERNAME: "faf-user-service"
+  DB_PASSWORD: "banana"
+  LOBBY_URL: "ws://localhost:8003"
+  IRC_TOKEN_TTL: "300"
+  LOBBY_SECRET: "banana"
+  
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: faf-user-service-mail-templates
+  labels:
+    app: faf-user-mail-templates
+data:
+  "account-activation.html": "{{username}} {{activationUrl}}"
+  "password-reset.html": "{{username}} {{passwordResetUrl}}"
+  "welcome-to-faf.html": "{{username}}"
