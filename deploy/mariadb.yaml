@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: faf-db
+  name: faf-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: faf-db
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: faf-db
+    spec:
+      containers:
+      - image: mariadb:10.6
+        env:
+        - name: MARIADB_ALLOW_EMPTY_ROOT_PASSWORD
+          value: "true"
+        name: mariadb
+        resources: {}
+        # volumeMounts:
+        # - name: db-pvc
+          # mountPath: /var/lib/mysql
+      # volumes:
+        # - name: db-pvc
+          # persistentVolumeClaim:
+            # claimName: db-pvc
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: faf-db-migrate
+spec:
+  template:
+    spec:
+      containers:
+        - image: faforever/faf-db-migrations:v134
+          name: faf-db-migrate
+          envFrom:
+            - configMapRef:
+                name: ory-hydra
+          args: ["migrate", "-url=jdbc:mysql://faf-db/faf?useSSL=false", "-user=root", "-password="]
+          ttlSecondsAfterFinished: "0"
+      restartPolicy: OnFailure
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: faf-db
+spec:
+  selector:
+    app: faf-db
+  ports:
+  - port: 3306

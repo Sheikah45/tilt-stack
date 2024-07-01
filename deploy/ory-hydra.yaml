@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ory-hydra
+  labels:
+    app: ory-hydra
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ory-hydra
+  template:
+    metadata:
+      labels:
+        app: ory-hydra
+    spec:
+      containers:
+        - image: oryd/hydra:v1.11.10
+          name: ory-hydra
+          envFrom:
+            - configMapRef:
+                name: ory-hydra
+          ports:
+            - containerPort: 4444
+            - containerPort: 4445
+          args: [ "serve", "all", "--dangerous-force-http"]
+      restartPolicy: Always
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ory-hydra-migrate
+spec:
+  template:
+    spec:
+      containers:
+        - image: oryd/hydra:v1.11.10
+          name: ory-hydra
+          envFrom:
+            - configMapRef:
+                name: ory-hydra
+          args: ["migrate", "sql", "--read-from-env", "--yes"]
+      restartPolicy: OnFailure
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ory-hydra
+  labels:
+    app: ory-hydra
+spec:
+  selector:
+    app: ory-hydra
+  ports:
+    - name: public-port
+      port: 4444
+      targetPort: 4444
+    - name: admin-port
+      port: 4445
+      targetPort: 4445
+      
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ory-hydra
+  labels:
+    app: ory-hydra
+data:
+  URLS_SELF_ISSUER: "http://localhost:4444"
+  URLS_LOGIN: "http://localhost:8080/oauth2/login"
+  URLS_CONSENT: "http://localhost:8080/oauth2/consent"
+  STRATEGIES_ACCESS_TOKEN: "jwt"
+  OAUTH2_CLIENT_CREDENTIALS_DEFAULT_GRANT_ALLOWED_SCOPE: "true"
+  DSN: "mysql://hydra:banana@tcp(faf-db:3306)/hydra"
+  SECRETS_SYSTEM: "sfgshrtsgsdgsfgshgsg"
