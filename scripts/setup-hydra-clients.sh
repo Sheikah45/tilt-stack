@@ -1,6 +1,6 @@
-kubectl exec %1 -- hydra clients delete --endpoint http://127.0.0.1:4445 faf-lobby-server faf-website faf-java-client faf-moderator-client faf-forum
+kubectl exec deployment/ory-hydra -- hydra clients delete --endpoint http://127.0.0.1:4445 faf-lobby-server faf-website faf-java-client faf-moderator-client faf-forum
 
-kubectl exec $1 -- hydra clients create \
+kubectl exec deployment/ory-hydra -- hydra clients create \
     --skip-tls-verify \
     --endpoint http://127.0.0.1:4445 \
     --fake-tls-termination \
@@ -11,7 +11,7 @@ kubectl exec $1 -- hydra clients create \
     --token-endpoint-auth-method client_secret_post \
     -g client_credentials
 
-kubectl exec $1 -- hydra clients create \
+kubectl exec deployment/ory-hydra -- hydra clients create \
     --skip-tls-verify \
     --endpoint http://127.0.0.1:4445 \
     --fake-tls-termination \
@@ -24,7 +24,7 @@ kubectl exec $1 -- hydra clients create \
     --scope openid,offline,public_profile,write_account_data,create_user \
     --callbacks http://localhost:3000/callback
 
-kubectl $1 -- hydra clients create \
+kubectl deployment/ory-hydra -- hydra clients create \
     --skip-tls-verify \
     --endpoint http://127.0.0.1:4445 \
     --fake-tls-termination \
@@ -37,7 +37,7 @@ kubectl $1 -- hydra clients create \
     --callbacks http://127.0.0.1 \
     --token-endpoint-auth-method none
 	
-kubectl exec $1 -- hydra clients create \
+kubectl exec deployment/ory-hydra -- hydra clients create \
     --skip-tls-verify \
     --endpoint http://127.0.0.1:4445 \
     --fake-tls-termination \
@@ -50,7 +50,7 @@ kubectl exec $1 -- hydra clients create \
     --callbacks http://127.0.0.1 \
     --token-endpoint-auth-method none
 
-kubectl exec $1 -- hydra clients create \
+kubectl exec deployment/ory-hydra -- hydra clients create \
     --skip-tls-verify \
     --endpoint http://127.0.0.1:4445 \
     --fake-tls-termination \
