@@ -24,13 +24,10 @@ spec:
           value: "true"
         name: mariadb
         resources: {}
-        # volumeMounts:
-        # - name: db-pvc
-          # mountPath: /var/lib/mysql
-      # volumes:
-        # - name: db-pvc
-          # persistentVolumeClaim:
-            # claimName: db-pvc
+        readinessProbe:
+          exec:
+            command: ["mysqladmin", "ping", "-uroot", "-h127.0.0.1"]
+          periodSeconds: 5
 
 ---
 apiVersion: batch/v1
