@@ -38,7 +38,7 @@ spec:
   template:
     spec:
       containers:
-        - image: faforever/faf-db-migrations:v134
+        - image: faforever/faf-db-migrations:v133
           name: faf-db-migrate
           envFrom:
             - configMapRef:
