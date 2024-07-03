@@ -2,6 +2,10 @@ config.define_string("windows-bash-path", args=False, usage="Path to bash.exe fo
 config.define_string("test-data-path", args=False, usage="Path to test data sql file")
 config.define_string_list("to-run", args=True)
 cfg = config.parse()
+windows_bash_path = cfg.get("windows-bash-path", "C:\\Program Files\\Git\\bin\\bash.exe")
+if os.name == "nt" and not os.path.exists(windows_bash_path):
+    fail("Windows users need to supply a valid path to a bash executable")
+    
 groups = {}
 resources = []
 for arg in cfg.get('to-run', []):
@@ -16,7 +20,7 @@ print(os.name)
 
 def as_windows_command(command):
     if type(command) == 'list':
-        return [cfg.get("windows-bash-path", "C:\\Program Files\\Git\\bin\\bash.exe"), "-c"] + [" ".join(command)]
+        return [windows_bash_path, "-c"] + [" ".join(command)]
     else:
         fail("Unknown command type")
     
@@ -27,6 +31,7 @@ k8s_yaml("deploy/faf-user-service.yaml")
 k8s_yaml("deploy/faf-api.yaml")
 k8s_yaml("deploy/faf-lobby-server.yaml")
 k8s_yaml("deploy/faf-ws-bridge.yaml")
+k8s_yaml("deploy/faf-league-service.yaml")
 
 setup_db_command = ["scripts/setup-db.sh"]
 local_resource(name = "setup-db", allow_parallel = True, cmd = setup_db_command, cmd_bat = as_windows_command(setup_db_command), resource_deps=["faf-db"], labels=["database"])
@@ -46,4 +51,5 @@ k8s_resource(workload='faf-user-service', objects=["faf-user-service:configmap",
 k8s_resource(workload='faf-api', objects=["faf-api:configmap", "faf-api-mail-templates"], port_forwards=["8010"], resource_deps=['faf-db-migrate', 'ory-hydra', 'setup-rabbitmq'], labels=["client"])
 k8s_resource(workload='faf-lobby-server', objects=["faf-lobby-server:configmap"], resource_deps=['faf-db-migrate', 'ory-hydra', 'setup-rabbitmq'], labels=["client"])
 k8s_resource(workload='faf-ws-bridge', port_forwards=["8003"], resource_deps=['faf-lobby-server'], labels=["client"])
+k8s_resource(workload='faf-league-service', objects=["faf-league-service:configmap"], resource_deps=['setup-db', 'setup-rabbitmq'], labels=["client"])
 

@@ -81,7 +81,7 @@ data:
   EMAIL_FROM_NAME: "FAForever"
   GITHUB_DEPLOYMENT_ENVIRONMENT: "development"
   LEAGUE_DATABASE_ADDRESS: "faf-db"
-  LEAGUE_DATABASE_NAME: "faf_league"
+  LEAGUE_DATABASE_NAME: "faf-league"
   LEAGUE_DATABASE_USERNAME: "faf-java-api"
   LEAGUE_DATABASE_PASSWORD: "banana"
   NODEBB_BASE_URL: "http://nodebb:4567"
