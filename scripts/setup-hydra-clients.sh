@@ -24,7 +24,7 @@ kubectl exec deployment/ory-hydra -- hydra clients create \
     --scope openid,offline,public_profile,write_account_data,create_user \
     --callbacks http://localhost:3000/callback
 
-kubectl deployment/ory-hydra -- hydra clients create \
+kubectl exec deployment/ory-hydra -- hydra clients create \
     --skip-tls-verify \
     --endpoint http://127.0.0.1:4445 \
     --fake-tls-termination \

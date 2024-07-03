@@ -23,6 +23,14 @@ spec:
           ports:
             - containerPort: 4444
             - containerPort: 4445
+          readinessProbe:
+            httpGet:
+              port: 4444
+              path: /.well-known/openid-configuration
+            initialDelaySeconds: 10
+            failureThreshold: 5
+            periodSeconds: 3
+          periodSeconds: 5
           args: [ "serve", "all", "--dangerous-force-http"]
       restartPolicy: Always
 
@@ -71,6 +79,7 @@ metadata:
     app: ory-hydra
 data:
   URLS_SELF_ISSUER: "http://ory-hydra:4444"
+  URLS_SELF_PUBLIC: "http://localhost:4444"
   URLS_LOGIN: "http://localhost:8080/oauth2/login"
   URLS_CONSENT: "http://localhost:8080/oauth2/consent"
   STRATEGIES_ACCESS_TOKEN: "jwt"

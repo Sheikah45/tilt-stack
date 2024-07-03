@@ -1,19 +1,14 @@
-#!/usr/bin/env bash
-#!/bin/bash
-
 create() {
   database=$1
   username=$2
   password=$3
   db_options=${4:-}
 
-  echo "Create database ${database} and create + assign user ${username}"
+  kubectl exec deployment/faf-db -- mysql --user=root --password= -e "CREATE DATABASE IF NOT EXISTS \`${database}\` ${db_options};"
+  kubectl exec deployment/faf-db -- mysql --user=root --password= -e "CREATE USER IF NOT EXISTS '${username}'@'%' IDENTIFIED BY '${password}';"
+  kubectl exec deployment/faf-db -- mysql --user=root --password= -e "GRANT ALL PRIVILEGES ON \`${database}\`.* TO '${username}'@'%';"
 
-  kubectl exec deployment/faf-db -- mysql --user=root --password= <<SQL_SCRIPT
-    CREATE DATABASE IF NOT EXISTS \`${database}\` ${db_options};
-    CREATE USER IF NOT EXISTS '${username}'@'%' IDENTIFIED BY '${password}';
-    GRANT ALL PRIVILEGES ON \`${database}\`.* TO '${username}'@'%';
-SQL_SCRIPT
+  echo "Created database ${database} and create + assign user ${username}"
 }
 
 create "faf" "faf-java-api" "banana"

@@ -68,10 +68,11 @@ metadata:
   labels:
     app: faf-api
 data:
-  FAF_DOMAIN: "{{.Values.baseDomain}}"
+  FAF_DOMAIN: "localhost"
   JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1024m -XX:+HeapDumpOnOutOfMemoryError"
 
   # App options
+  JWT_FAF_HYDRA_ISSUER: "http://ory-hydra:4444/"
   DATABASE_ADDRESS: "faf-db"
   DATABASE_NAME: "faf"
   DATABASE_USERNAME: "faf-java-api"
