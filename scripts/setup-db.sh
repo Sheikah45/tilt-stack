@@ -13,7 +13,7 @@ create() {
 
 create "faf" "faf-java-api" "banana"
 create "faf" "faf-python-api" "banana"
-create "faf" "faf-aio-replayserver" "banana"
+create "faf" "faf-replay-server" "banana"
 create "faf" "faf-policy-server" "banana"
 create "faf" "faf-python-server" "banana"
 create "faf" "faf-user-service" "banana"
