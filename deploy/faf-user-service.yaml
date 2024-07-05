@@ -83,3 +83,18 @@ data:
   "account-activation.html": "{{username}} {{activationUrl}}"
   "password-reset.html": "{{username}} {{passwordResetUrl}}"
   "welcome-to-faf.html": "{{username}}"
+  
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: faf-user-service
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`user.localhost`)
+      kind: Rule
+      services:
+        - name: faf-user-service
+          port: 8080

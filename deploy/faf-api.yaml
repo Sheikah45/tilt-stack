@@ -15,7 +15,8 @@ spec:
         app: faf-api
     spec:
       containers:
-        - image: faforever/faf-java-api:v3.4.5
+        - image: faforever/faf-java-api:cds
+          imagePullPolicy: Always
           name: faf-api
           envFrom:
             - configMapRef:
@@ -90,7 +91,7 @@ data:
   RABBIT_HOST: "rabbitmq"
   RABBIT_USERNAME: "faf-api"
   RABBIT_PASSWORD: "banana"
-  REPLAY_DOWNLOAD_URL_FORMAT: http://localhost:8000/replays/%s
+  REPLAY_DOWNLOAD_URL_FORMAT: http://content.localhost/replays/%s
   GITHUB_ACCESS_TOKEN: "false"
   GITHUB_WEBHOOK_SECRET: "false"
   API_PROFILE: "develop"
@@ -149,3 +150,33 @@ spec:
   ports:
     - port: 8010
       targetPort: 8010
+      
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: faf-api-api
+spec:
+  entryPoints:
+    - api
+  routes:
+    - match: Host(`localhost`)
+      kind: Rule
+      services:
+        - name: faf-api
+          port: 8010
+          
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: faf-api-web
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`api.localhost`)
+      kind: Rule
+      services:
+        - name: faf-api
+          port: 8010

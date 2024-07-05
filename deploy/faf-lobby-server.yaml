@@ -58,7 +58,7 @@ data:
   CONFIGURATION_FILE: "/config/config.yaml"
   "config.yaml": |
     CONFIGURATION_REFRESH_TIME: 60
-    LOG_LEVEL: "DEBUG"
+    LOG_LEVEL: "TRACE"
     LISTEN:
       - ADDRESS:
         PORT: 8003

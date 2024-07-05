@@ -145,18 +145,19 @@ values (1, "ladder1v1", 1, 1, "matchmaker.ladder1v1"),
 insert into map_pool (id, name)
 values (1, "Ladder1v1 season 1: 5-10k"),
        (2, "Ladder1v1 season 1: all"),
-       (3, "Large maps");
+       (3, "Large maps"),
+       (4, "2v2 maps");
 
 insert into map_pool_map_version (map_pool_id, map_version_id)
 values (1, 15), (1, 16), (1, 17),
        (2, 11), (2, 14), (2, 15), (2, 16), (2, 17),
-       (3, 1),  (3, 2),  (3, 3);
+       (3, 1),  (3, 2),  (3, 3), (4, 1);
 
 insert into matchmaker_queue_map_pool (matchmaker_queue_id, map_pool_id, min_rating, max_rating)
 values (1, 1, NULL, 800),
        (1, 2, 800, NULL),
        (1, 3, 1000, NULL),
-       (2, 3, NULL, NULL);
+       (2, 4, NULL, NULL);
 
 insert into `mod` (id, display_name, author, license)
 VALUES (1, 'test-mod', 'baz', 1),

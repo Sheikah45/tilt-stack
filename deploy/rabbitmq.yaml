@@ -69,5 +69,24 @@ spec:
   selector:
     app: rabbitmq
   ports:
-    - port: 5672
+    - name: message
+      port: 5672
       targetPort: 5672
+    - name: dashboard
+      port: 15672
+      targetPort: 15672
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: rabbitmq
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`rabbitmq.localhost`)
+      kind: Rule
+      services:
+        - name: rabbitmq
+          port: 15672
