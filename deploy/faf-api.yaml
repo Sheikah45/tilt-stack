@@ -58,7 +58,7 @@ spec:
             defaultMode: 440
         - name: mail-templates
           configMap:
-            name: faf-user-service-mail-templates
+            name: faf-api-mail-templates
 
 ---
 apiVersion: v1

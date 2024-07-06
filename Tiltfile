@@ -6,9 +6,12 @@ windows_bash_path = cfg.get("windows-bash-path", "C:\\Program Files\\Git\\bin\\b
 if os.name == "nt" and not os.path.exists(windows_bash_path):
     fail("Windows users need to supply a valid path to a bash executable")
     
-groups = {}
+groups = {
+    "client": ["faf-api", "faf-ws-bridge", "faf-replay-server", "faf-league-service", "faf-user-service", "populate-coturn"],
+    "api": ["faf-api", "faf-user-service"]
+}
 resources = []
-for arg in cfg.get('to-run', []):
+for arg in cfg.get("to-run", []):
   if arg in groups:
     resources += groups[arg]
   else:
@@ -17,7 +20,7 @@ for arg in cfg.get('to-run', []):
 config.set_enabled_resources(resources)
 
 def as_windows_command(command):
-    if type(command) == 'list':
+    if type(command) == "list":
         return [windows_bash_path, "-c"] + [" ".join(command)]
     else:
         fail("Unknown command type")
@@ -40,23 +43,23 @@ local_resource(name = "setup-db", allow_parallel = True, cmd = setup_db_command,
 setup_rabbit_command = ["scripts/setup-rabbitmq.sh"]
 local_resource(name = "setup-rabbitmq", allow_parallel = True, cmd = setup_rabbit_command, cmd_bat = as_windows_command(setup_rabbit_command), resource_deps=["rabbitmq"], labels=["messaging"])
 setup_hydra_command = ["scripts/setup-hydra-clients.sh"]
-local_resource(name = "setup-hydra-clients", allow_parallel = True, cmd = setup_hydra_command, cmd_bat = as_windows_command(setup_hydra_command), resource_deps=["ory-hydra"], labels=["authentication", "client"])
+local_resource(name = "setup-hydra-clients", allow_parallel = True, cmd = setup_hydra_command, cmd_bat = as_windows_command(setup_hydra_command), resource_deps=["ory-hydra"], labels=["authentication"])
 populate_db_command = ["scripts/populate-db.sh", cfg.get("test-data-path", "sql/test-data.sql")]
 local_resource(name = "populate-db", allow_parallel = True, cmd = populate_db_command, cmd_bat = as_windows_command(populate_db_command), resource_deps=["faf-db-migrate"], labels=["database"])
 populate_db_command = ["scripts/populate-coturn.sh"]
 local_resource(name = "populate-coturn", allow_parallel = True, cmd = populate_db_command, cmd_bat = as_windows_command(populate_db_command), resource_deps=["faf-ice-breaker"], labels=["database"])
 
 k8s_resource(new_name="traefik_crds", objects=["ingressroutes.traefik.io","middlewares.traefik.io","ingressroutetcps.traefik.io","ingressrouteudps.traefik.io","middlewaretcps.traefik.io","serverstransports.traefik.io","serverstransporttcps.traefik.io","tlsoptions.traefik.io","tlsstores.traefik.io","traefikservices.traefik.io"], labels=["traefik"])
-k8s_resource(workload='faf-db', port_forwards="3306", labels=["database"])
+k8s_resource(workload="faf-db", port_forwards="3306", labels=["database"])
 k8s_resource(workload="faf-db-migrate", resource_deps=["setup-db"], labels=["database"])
-k8s_resource(workload='ory-hydra-migrate', objects=["ory-hydra:configmap"], resource_deps=["faf-db"], labels=["authentication"])
-k8s_resource(workload='ory-hydra', objects=["ory-hydra:ingressroute"], port_forwards=["4444","4445"], resource_deps=["ory-hydra-migrate","traefik_crds"], labels=["authentication"])
-k8s_resource(workload='rabbitmq', objects=["rabbitmq:configmap","rabbitmq:ingressroute"], port_forwards=["5672", "15672"], labels=["messaging"])
-k8s_resource(workload='faf-user-service', objects=["faf-user-service:configmap", "faf-user-service-mail-templates","faf-user-service:ingressroute"], port_forwards=["8080"], resource_deps=["ory-hydra", "faf-db","traefik_crds"], labels=["authentication", "client"])
-k8s_resource(workload='faf-api', objects=["faf-api:configmap", "faf-api-mail-templates", "faf-api-api:ingressroute", "faf-api-web:ingressroute"], resource_deps=['faf-db-migrate', 'ory-hydra', 'setup-rabbitmq',"traefik_crds"], labels=["client"])
-k8s_resource(workload='faf-ice-breaker', objects=["faf-ice-breaker:configmap", "faf-ice-breaker-stripprefix", "faf-ice-breaker-api:ingressroute", "faf-ice-breaker-web:ingressroute"], resource_deps=['faf-db-migrate', 'ory-hydra', 'setup-rabbitmq', 'traefik_crds'], labels=["client"])
-k8s_resource(workload='faf-lobby-server', objects=["faf-lobby-server:configmap"], resource_deps=['faf-db-migrate', 'ory-hydra', 'setup-rabbitmq',"traefik_crds"], labels=["client"])
-k8s_resource(workload='faf-ws-bridge', objects=["faf-replay-server:configmap"], port_forwards=["8003"], resource_deps=['faf-lobby-server'], labels=["client"])
-k8s_resource(workload='faf-replay-server', port_forwards=["15000"], resource_deps=['faf-db-migrate'], labels=["client"])
-k8s_resource(workload='faf-league-service', objects=["faf-league-service:configmap"], resource_deps=['setup-db', 'setup-rabbitmq'], labels=["client"])
-k8s_resource(workload='traefik-deployment', objects=["traefik-ingress-controller:clusterrole","traefik-ingress-controller:clusterrolebinding","traefik-ingress-controller:serviceaccount","traefik:ingressroute"], labels=["traefik"])
+k8s_resource(workload="ory-hydra-migrate", objects=["ory-hydra:configmap"], resource_deps=["faf-db"], labels=["authentication"])
+k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], port_forwards=["4444","4445"], resource_deps=["ory-hydra-migrate","traefik_crds"], labels=["authentication"], links=["http://hydra.localhost/.well-known/openid-configuration"])
+k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap","rabbitmq:ingressroute"], port_forwards=["5672", "15672"], resource_deps=["traefik_crds"], labels=["messaging"], links=["http://rabbitmq.localhost"])
+k8s_resource(workload="faf-user-service", objects=["faf-user-service:configmap", "faf-user-service-mail-templates","faf-user-service:ingressroute"], port_forwards=["8080"], resource_deps=["setup-hydra-clients", "faf-db-migrate","traefik_crds","populate-db"], labels=["client"], links=["http://user.localhost"])
+k8s_resource(workload="faf-api", objects=["faf-api:configmap", "faf-api-mail-templates", "faf-api-api:ingressroute", "faf-api-web:ingressroute"], resource_deps=["faf-db-migrate", "setup-rabbitmq","traefik_crds","populate-db"], labels=["client"], links=["http://api.localhost"])
+k8s_resource(workload="faf-ice-breaker", objects=["faf-ice-breaker:configmap", "faf-ice-breaker-stripprefix", "faf-ice-breaker-api:ingressroute", "faf-ice-breaker-web:ingressroute"], resource_deps=["faf-db-migrate", "ory-hydra", "setup-rabbitmq", "traefik_crds"], labels=["client"], links=["http://api.localhost/ice"])
+k8s_resource(workload="faf-lobby-server", objects=["faf-lobby-server:configmap"], resource_deps=["faf-db-migrate", "ory-hydra", "setup-rabbitmq"], labels=["client"])
+k8s_resource(workload="faf-ws-bridge", port_forwards=["8003"], resource_deps=["faf-lobby-server"], labels=["client"])
+k8s_resource(workload="faf-replay-server", objects=["faf-replay-server:configmap"], port_forwards=["15000"], resource_deps=["faf-db-migrate"], labels=["client"])
+k8s_resource(workload="faf-league-service", objects=["faf-league-service:configmap"], resource_deps=["setup-db", "setup-rabbitmq"], labels=["client"])
+k8s_resource(workload="traefik-deployment", objects=["traefik-ingress-controller:clusterrole","traefik-ingress-controller:clusterrolebinding","traefik-ingress-controller:serviceaccount","traefik:ingressroute"], labels=["traefik"], links=["http://traefik.localhost"])
