@@ -26,8 +26,7 @@ spec:
               name: faf-lobby-server
               subPath: "config.yaml"
           ports:
-            - name: websocket
-              containerPort: 8003
+            - containerPort: 8002
           startupProbe:
             httpGet:
               port: 2000
@@ -61,7 +60,7 @@ data:
     LOG_LEVEL: "TRACE"
     LISTEN:
       - ADDRESS:
-        PORT: 8003
+        PORT: 8002
         PROTOCOL: SimpleJsonProtocol
         PROXY: false
     DB_SERVER: "faf-db"
@@ -104,6 +103,5 @@ spec:
   selector:
     app: faf-lobby-server
   ports:
-    - name: websocket
-      port: 8003
-      targetPort: 8003
+    - port: 8002
+      targetPort: 8002

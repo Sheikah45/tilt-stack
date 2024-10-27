@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - image: faforever/ws_bridge_rs:0.1.4
-          args: ["ws_to_tcp", "-vvv", "0.0.0.0:8003", "faf-lobby-server:8003"]
+          args: ["ws_to_tcp", "-vvv", "0.0.0.0:8003", "faf-lobby-server:8002"]
           name: faf-ws-bridge
           ports:
             - containerPort: 8003
