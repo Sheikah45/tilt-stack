@@ -1,3 +1,5 @@
+#!/bin/sh
+
 kubectl exec deployment/ory-hydra -- hydra clients delete --endpoint http://127.0.0.1:4445 faf-lobby-server faf-website faf-java-client faf-moderator-client faf-forum
 
 kubectl exec deployment/ory-hydra -- hydra clients create \

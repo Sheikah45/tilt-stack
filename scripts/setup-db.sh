@@ -1,3 +1,5 @@
+#!/bin/sh
+
 create() {
   database=$1
   username=$2
