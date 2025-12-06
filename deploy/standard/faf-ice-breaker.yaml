@@ -15,7 +15,7 @@ spec:
         app: faf-ice-breaker
     spec:
       containers:
-        - image: faforever/faf-icebreaker:1.0.5
+        - image: faforever/faf-icebreaker:1.1.9
           name: faf-ice-breaker
           envFrom:
             - configMapRef:
@@ -53,6 +53,10 @@ data:
   XIRSYS_ENABLED: "false"
   XIRSYS_SECRET: "false"
   XIRSYS_IDENT: "false"
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PASSWORD: "banana"
+  RABBITMQ_USER: "faf-icebreaker"
+  RABBITMQ_PORT: "5672"
   JWT_PRIVATE_KEY_PATH: |
       -----BEGIN PRIVATE KEY-----
       MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDXsCsl9W0vnW2k

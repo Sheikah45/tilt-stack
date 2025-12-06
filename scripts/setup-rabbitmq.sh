@@ -7,3 +7,5 @@ kubectl exec statefulset/rabbitmq -- rabbitmqctl add_user faf-python-server bana
 kubectl exec statefulset/rabbitmq -- rabbitmqctl set_permissions -p //faf-core faf-python-server ".*" ".*" ".*" 
 kubectl exec statefulset/rabbitmq -- rabbitmqctl add_user faf-league-service banana
 kubectl exec statefulset/rabbitmq -- rabbitmqctl set_permissions -p //faf-core faf-league-service ".*" ".*" ".*" 
+kubectl exec statefulset/rabbitmq -- rabbitmqctl add_user faf-icebreaker banana
+kubectl exec statefulset/rabbitmq -- rabbitmqctl set_permissions -p //faf-core faf-icebreaker ".*" ".*" ".*" 

@@ -15,7 +15,7 @@ spec:
         app: ory-hydra
     spec:
       containers:
-        - image: oryd/hydra:v1.11.10
+        - image: oryd/hydra:v25.4.0
           name: ory-hydra
           envFrom:
             - configMapRef:
@@ -31,7 +31,7 @@ spec:
             failureThreshold: 5
             periodSeconds: 3
           periodSeconds: 5
-          args: [ "serve", "all", "--dangerous-force-http"]
+          args: [ "serve", "all", "--dev"]
       restartPolicy: Always
 
 ---
@@ -43,12 +43,12 @@ spec:
   template:
     spec:
       containers:
-        - image: oryd/hydra:v1.11.10
+        - image: oryd/hydra:v25.4.0
           name: ory-hydra
           envFrom:
             - configMapRef:
                 name: ory-hydra
-          args: ["migrate", "sql", "--read-from-env", "--yes"]
+          args: ["migrate", "sql", "up", "--read-from-env", "--yes"]
           ttlSecondsAfterFinished: "0"
       restartPolicy: OnFailure
 
@@ -84,9 +84,12 @@ data:
   URLS_CONSENT: "http://localhost:8080/oauth2/consent"
   STRATEGIES_ACCESS_TOKEN: "jwt"
   OAUTH2_CLIENT_CREDENTIALS_DEFAULT_GRANT_ALLOWED_SCOPE: "true"
-  DSN: "mysql://hydra:banana@tcp(faf-db:3306)/hydra"
+  DSN: "postgres://hydra:banana@postgres:5432/ory-hydra"
+  DB_USER: "hydra"
+  DB_NAME: "ory-hydra"
+  DB_PASSWOD: "banana"
   SECRETS_SYSTEM: "sfgshrtsgsdgsfgshgsg"
-
+  
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute

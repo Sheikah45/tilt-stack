@@ -26,8 +26,13 @@ populate_db_command = ["scripts/populate-db.sh", cfg.get("test-data-path", "sql/
 local_resource(name = "populate-db", allow_parallel = True, cmd = populate_db_command, cmd_bat = as_windows_command(populate_db_command), resource_deps=["faf-db-migrate"], labels=["database"])
 populate_db_command = ["scripts/populate-coturn.sh"]
 local_resource(name = "populate-coturn", allow_parallel = True, cmd = populate_db_command, cmd_bat = as_windows_command(populate_db_command), resource_deps=["faf-ice-breaker"], labels=["database"])
-k8s_resource(workload="faf-db", port_forwards="3306", labels=["database"])
+k8s_resource(workload="faf-db", objects=["mariadb:configmap"], port_forwards="3306", labels=["database"])
 k8s_resource(workload="faf-db-migrate", resource_deps=["setup-db"], labels=["database"])
+
+k8s_yaml("deploy/standard/postgres.yaml")
+setup_postgres_command = ["scripts/setup-postgres.sh"]
+local_resource(name = "setup-postgres", allow_parallel = True, cmd = setup_postgres_command, cmd_bat = as_windows_command(setup_postgres_command), resource_deps=["postgres"], labels=["database"])
+k8s_resource(workload="postgres", objects=["postgres:configmap"], port_forwards="5432", labels=["database"])
 
 k8s_yaml("deploy/standard/rabbitmq.yaml")
 setup_rabbit_command = ["scripts/setup-rabbitmq.sh"]
@@ -37,7 +42,7 @@ k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap","rabbitmq:ingres
 k8s_yaml("deploy/standard/ory-hydra.yaml")
 setup_hydra_command = ["scripts/setup-hydra-clients.sh"]
 local_resource(name = "setup-hydra-clients", allow_parallel = True, cmd = setup_hydra_command, cmd_bat = as_windows_command(setup_hydra_command), resource_deps=["ory-hydra"], labels=["authentication"])
-k8s_resource(workload="ory-hydra-migrate", objects=["ory-hydra:configmap"], resource_deps=["faf-db"], labels=["authentication"])
+k8s_resource(workload="ory-hydra-migrate", objects=["ory-hydra:configmap"], resource_deps=["postgres"], labels=["authentication"])
 k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], port_forwards=["4444","4445"], resource_deps=["ory-hydra-migrate","traefik_crds"], labels=["authentication"], links=["http://hydra.localhost/.well-known/openid-configuration"])
 
 k8s_yaml("deploy/standard/faf-replay-server.yaml")
@@ -61,7 +66,7 @@ else:
 k8s_resource(workload="faf-lobby-server", objects=["faf-lobby-server:configmap"], resource_deps=["faf-db-migrate", "ory-hydra", "setup-rabbitmq"], labels=["client"])
 
 k8s_yaml("deploy/standard/faf-ws-bridge.yaml")
-k8s_resource(workload="faf-ws-bridge", port_forwards=["8003","8002"], labels=["client"])
+k8s_resource(workload="faf-ws-bridge", port_forwards=["8003"], labels=["client"])
 
 k8s_yaml("deploy/standard/faf-league-service.yaml")
 k8s_resource(workload="faf-league-service", objects=["faf-league-service:configmap"], resource_deps=["setup-db", "setup-rabbitmq"], labels=["client"])

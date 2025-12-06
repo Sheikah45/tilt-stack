@@ -15,7 +15,7 @@ spec:
         app: faf-api
     spec:
       containers:
-        - image: faforever/faf-java-api:v3.4.5
+        - image: faforever/faf-java-api:v3.8.3
           name: faf-api
           envFrom:
             - configMapRef:
@@ -72,7 +72,7 @@ data:
   JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1024m -XX:+HeapDumpOnOutOfMemoryError"
 
   # App options
-  JWT_FAF_HYDRA_ISSUER: "http://ory-hydra:4444/"
+  JWT_FAF_HYDRA_ISSUER: "http://ory-hydra:4444"
   DATABASE_ADDRESS: "faf-db"
   DATABASE_NAME: "faf"
   DATABASE_USERNAME: "faf-java-api"
@@ -94,6 +94,7 @@ data:
   GITHUB_ACCESS_TOKEN: "false"
   GITHUB_WEBHOOK_SECRET: "false"
   API_PROFILE: "develop"
+  DATABASE_SCHEMA_VERSION: "137"
   SECRET.KEY: |
       -----BEGIN RSA PRIVATE KEY-----
       MIIEpgIBAAKCAQEAzTpJ/ytBu3dih41bEqRnchNfkyCigIWDHrbBa+0Szw853Oew
