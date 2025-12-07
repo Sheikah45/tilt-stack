@@ -29,11 +29,17 @@ def keep_objects_of_kind(yaml, kinds):
     objects = decode_yaml_stream(yaml)
     return encode_yaml_stream([object for object in objects if object["kind"] in kinds])
 
-def remove_init_container(yaml):
+def cronjob_to_job(yaml):
     objects = decode_yaml_stream(yaml)
     for object in objects:
-        if object["kind"] == "StatefulSet":
-            object["spec"]["template"]["spec"].pop("initContainers")
+        if object["kind"] == "CronJob":
+            object["kind"] = "Job"
+            spec = object["spec"]
+            spec.pop("suspend")
+            spec.pop("schedule")
+            jobTemplate = spec.pop("jobTemplate")
+            spec["template"] = jobTemplate["spec"]["template"]
+
     return encode_yaml_stream(objects)
 
 def to_hostpath_storage(yaml):
@@ -53,7 +59,9 @@ def to_hostpath_storage(yaml):
 watch_file("config/values-local.yaml")
 
 load("ext://git_resource", "git_checkout")
-git_checkout("git@github.com:FAForever/gitops-stack.git", "gitops-stack")
+
+if not os.path.exists("gitops-stack"):
+    git_checkout("git@github.com:FAForever/gitops-stack.git", "gitops-stack")
 
 k8s_yaml("config/namespaces.yaml")
 k8s_resource(new_name="namespaces", objects=["faf-infra:namespace", "faf-apps:namespace", "faf-ops:namespace"], labels=["core"])
@@ -61,22 +69,25 @@ k8s_resource(new_name="namespaces", objects=["faf-infra:namespace", "faf-apps:na
 k8s_yaml(to_hostpath_storage(helm("gitops-stack/cluster/storage", values=["config/values-local.yaml"], set=["dataPath="+data_absolute_path])))
 
 k8s_yaml("local-secrets/postgres.yaml")
-k8s_yaml(remove_init_container(remove_objects_of_kind(helm("gitops-stack/infra/postgres", namespace="faf-infra", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"])))
-
+k8s_yaml(remove_objects_of_kind(helm("gitops-stack/infra/postgres", namespace="faf-infra", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"]))
+k8s_yaml(remove_objects_of_kind(helm("gitops-stack/apps/faf-postgres", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"]))
 k8s_resource(new_name="postgres-volume", objects=["postgres:persistentvolume", "postgres-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
-k8s_resource(workload="postgres", objects=["postgres:configmap", "postgres:secret"], port_forwards=["5432"], resource_deps=["postgres-volume"], labels=["database"])
+k8s_resource(workload="postgres", objects=["postgres:configmap", "postgres:secret", "postgres:service:faf-apps"], port_forwards=["5432"], resource_deps=["postgres-volume"], labels=["database"])
 
 k8s_yaml("local-secrets/mariadb.yaml")
 k8s_yaml(remove_objects_of_kind(helm("gitops-stack/infra/mariadb", namespace="faf-infra", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"]))
-
+k8s_yaml(remove_objects_of_kind(helm("gitops-stack/apps/faf-mariadb", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"]))
 k8s_resource(new_name="mariadb-volume", objects=["mariadb:persistentvolume", "mariadb-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
-k8s_resource(workload="mariadb", objects=["mariadb:configmap", "mariadb:secret"], port_forwards=["3306"], resource_deps=["mariadb-volume"], labels=["database"])
+k8s_resource(workload="mariadb", objects=["mariadb:configmap", "mariadb:secret", "mariadb:service:faf-apps"], port_forwards=["3306"], resource_deps=["mariadb-volume"], labels=["database"])
 
 k8s_yaml("local-secrets/rabbitmq.yaml")
 k8s_yaml(remove_objects_of_kind(helm("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"]))
-
 k8s_resource(new_name="rabbitmq-volume", objects=["rabbitmq:persistentvolume", "rabbitmq-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
 k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap", "rabbitmq:secret"], port_forwards=["15672"], resource_deps=["rabbitmq-volume"], labels=["database"])
+
+k8s_yaml("local-secrets/faf-db-migrations.yaml")
+k8s_yaml(cronjob_to_job(remove_objects_of_kind(helm("gitops-stack/apps/faf-db-migrations", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["InfisicalSecret"])))
+k8s_resource(workload="faf-db-migrations", objects=["faf-db-migrations:secret"], resource_deps=["setup-mariadb"], labels=["database"])
 
 k8s_yaml("local-secrets/faf-voting.yaml")
 k8s_yaml(keep_objects_of_kind(helm("gitops-stack/apps/faf-voting", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["ConfigMap"]))
@@ -115,8 +126,9 @@ k8s_yaml(keep_objects_of_kind(helm("gitops-stack/apps/faf-replay-server", namesp
 k8s_resource(new_name="faf-replay-server-config", objects=["faf-replay-server:configmap", "faf-replay-server:secret"], labels=["replay"])
 
 k8s_yaml("local-secrets/faf-user-service.yaml")
-k8s_yaml(keep_objects_of_kind(helm("gitops-stack/apps/faf-user-service", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["ConfigMap"]))
+k8s_yaml(remove_objects_of_kind(helm("gitops-stack/apps/faf-user-service", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["InfisicalSecret", "IngressRoute"]))
 k8s_resource(new_name="faf-user-service-config", objects=["faf-user-service:configmap", "faf-user-service:secret"], labels=["user"])
+k8s_resource(workload="faf-user-service", port_forwards=["8080"], labels=["user"])
 
 k8s_yaml("local-secrets/wordpress.yaml")
 k8s_yaml(keep_objects_of_kind(helm("gitops-stack/apps/wordpress", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["ConfigMap"]))
@@ -138,7 +150,7 @@ k8s_yaml("local-secrets/ory-hydra.yaml")
 k8s_yaml(remove_objects_of_kind(helm("gitops-stack/apps/ory-hydra", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["InfisicalSecret", "IngressRoute", "CronJob"]))
 k8s_resource(new_name="ory-hydra-config", objects=["ory-hydra:configmap", "ory-hydra:secret"], labels=["ory-hydra"])
 k8s_resource(workload="ory-hydra-migration", resource_deps=["ory-hydra-config", "setup-postgres"], labels=["ory-hydra"])
-k8s_resource(workload="ory-hydra", resource_deps=["ory-hydra-migration"], port_forwards=["4444"], labels=["ory-hydra"])
+k8s_resource(workload="ory-hydra", resource_deps=["ory-hydra-migration"], port_forwards=["4444", "4445"], labels=["ory-hydra"])
 for i in range(1, 10):
     k8s_resource(workload="ory-hydra-create-client-"+str(i), resource_deps=["ory-hydra"], labels=["ory-hydra"])
 

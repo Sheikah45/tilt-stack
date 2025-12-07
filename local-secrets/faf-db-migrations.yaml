@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: faf-db-migrations
+  namespace: faf-apps
+stringData:
+  FLYWAY_USER: root
+  FLYWAY_PASSWORD: banana

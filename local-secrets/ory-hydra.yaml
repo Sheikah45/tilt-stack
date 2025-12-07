@@ -6,6 +6,6 @@ metadata:
 stringData:
   BRACKMAN_DISCORD_SECRET: banana
   DB_PASSWORD: banana
-  DSN: postgres://hydra:banana@postgres.faf-infra.svc.cluster.local:5432/ory-hydra
+  DSN: postgres://hydra:banana@postgres:5432/ory-hydra
   FAF_QAI_SECRET: banana
   SECRETS_SYSTEM: elfkshfdkfhsalfjlff
