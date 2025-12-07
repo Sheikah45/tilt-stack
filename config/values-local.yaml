@@ -5,7 +5,7 @@ infisical:
   envSlug: ""
 baseDomain: "localhost"
 traefik:
-  tlsStoreSecret: ""
+  tlsStoreSecret: "faf-local"
 zfs:
   nodeId: ""
   poolName: ""
