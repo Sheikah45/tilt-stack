@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ergochat
+  namespace: faf-apps
+stringData:
+  ERGO__DATASTORE__MYSQL__PASSWORD: banana

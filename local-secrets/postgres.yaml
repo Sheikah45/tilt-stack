@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres
+  namespace: faf-infra
+stringData:
+  POSTGRES_PASSWORD: banana

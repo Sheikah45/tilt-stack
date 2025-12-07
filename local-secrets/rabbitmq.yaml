@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq
+  namespace: faf-apps
+stringData:
+  ADMIN_PASSWORD: banana

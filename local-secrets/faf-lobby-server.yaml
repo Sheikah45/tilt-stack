@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: faf-lobby-server
+  namespace: faf-apps
+stringData:
+  DB_PASSWORD: banana

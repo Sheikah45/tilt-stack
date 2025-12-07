@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: faf-website
+  namespace: faf-apps
+stringData:
+  OAUTH_CLIENT_ID: c5613672-0ee5-4956-8b03-c7951ef25640
+  OAUTH_CLIENT_SECRET: banana
+  OAUTH_M2M_CLIENT_ID: b9f62a18-faae-43cc-a9b7-e15613e00273
+  OAUTH_M2M_CLIENT_SECRET: banana
+  RECAPTCHA_SITE_KEY: 6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI
+  SESSION_SECRET_KEY: banana

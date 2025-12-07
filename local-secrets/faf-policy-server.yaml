@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: faf-policy-server
+  namespace: faf-apps
+stringData:
+  DATABASE_PASSWORD: banana

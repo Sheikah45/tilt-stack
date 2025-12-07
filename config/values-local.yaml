@@ -1,0 +1,15 @@
+hostName: "localhost"
+environment: "local"
+infisical:
+  projectSlug: ""
+  envSlug: ""
+baseDomain: "localhost"
+traefik:
+  tlsStoreSecret: ""
+zfs:
+  nodeId: ""
+  poolName: ""
+  datasetPrefix: ""
+zfs-localpv:
+  zfs:
+    bin: ""
