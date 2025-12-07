@@ -17,7 +17,8 @@ The tilt stack is currently intended to be used transiently so there is no local
 * [Tilt](https://docs.tilt.dev/install.html)
 * Kuberenetes ([Minikube](https://minikube.sigs.k8s.io/docs/) or [Docker Desktop](https://docs.docker.com/desktop/kubernetes/) is recommended for those new to kubernetes) (Tilt cluster setup)[https://docs.tilt.dev/choosing_clusters]
 * For windows users a bash program. By default git bash is used with an assumed installation directory of C:/Program Files/Git
-* [jq](https://jqlang.org/) must be installed for some of the setup scripts to work
+* [jq](https://jqlang.org/download/) must be installed for some of the setup scripts to work
+* [helm](https://helm.sh/docs/intro/install/) must be installed to generate the k8s from the helm charts in the gitops repo
 
 ## Startup Services
 In the root directoy of your repository run `tilt up`. This will start all the faf services in the correct order. The status of each service can be viewed in the tilt UI by visiting http://localhost:10350. This is the control server for tilt where you can restart services or disable them for substitution by services you would like to run from source code as you actively develop them.
