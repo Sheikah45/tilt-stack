@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: wikijs
-  namespace: faf-apps
-stringData:
-  DB_PASS: banana

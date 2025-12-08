@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: faf-voting
-  namespace: faf-apps
-stringData:
-  CLIENT_SECRET: banana
-  SESSION_SECRET: banana

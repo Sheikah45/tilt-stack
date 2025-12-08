@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: faf-league-service
-  namespace: faf-apps
-stringData:
-  DB_PASSWORD: banana

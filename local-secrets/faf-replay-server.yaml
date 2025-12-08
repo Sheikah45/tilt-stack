@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: faf-replay-server
-  namespace: faf-apps
-stringData:
-  RS_DB_PASSWORD: banana
