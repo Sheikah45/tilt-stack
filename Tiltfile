@@ -24,44 +24,19 @@ def as_windows_command(command):
     else:
         fail("Unknown command type")
 
-def helm_update_if_needed(chart, namespace="", **kwargs):
-    command = ["helm", "dependency", "update", chart, "--namespace", namespace]
-    chart_resource = chart.replace("/", "-")
-    if not os.path.exists(os.path.join(chart, "charts")) and "dependencies" in read_yaml(os.path.join(chart, "Chart.yaml")):
-        local(command)
-
-    local_resource(name=chart_resource + "-update", cmd=command, auto_init=False, labels=["helm"], deps=[os.path.join(chart, "Chart.yaml")])
-
-def helm_with_build_cache(chart, namespace="", values=[], set=[]):
-    cache_dir = ".helm-cache"
-    
-    chart_resource = chart.replace("/", "-")
-    chart_cache_path = os.path.join(cache_dir, chart)
-    cached_yaml = os.path.join(chart_cache_path, "yaml")
-    value_flags = [fragment for value in values for fragment in ("--values", value)]
-    set_flags = [fragment for set_value in set for fragment in ("--set", set_value)]
-    command = ["./scripts/helm-with-cache.sh", cache_dir, chart, "--include-crds"]
-    if namespace:
-        command.extend(["--namespace", namespace])
-    command.extend(value_flags)
-    command.extend(set_flags)
-
-    if not os.path.exists(cached_yaml):
-        local(command=command, command_bat=as_windows_command(command))
-    
-    deps = [chart]
-    deps.extend(values)
-    agnostic_local_resource(name=chart_resource + "-helm", cmd=command, labels=["helm"], deps=deps, allow_parallel=True)
-    watch_file(cached_yaml)
-
-    objects = read_yaml_stream(cached_yaml)
-    if namespace:
-        for object in objects:
-            object["metadata"]["namespace"] = namespace 
-    return encode_yaml_stream(objects)
-
 def agnostic_local_resource(name, cmd, **kwargs):
     local_resource(name=name, cmd=cmd, cmd_bat=as_windows_command(cmd), **kwargs)
+
+def agnostic_local(cmd):
+    local(command=cmd, command_bat=as_windows_command(cmd))
+
+def patch_config(yaml, config_name, config):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if object["kind"] == "ConfigMap" and object["metadata"]["name"] == config_name:
+            object["data"].update(config)
+    
+    return encode_yaml_stream(objects)
 
 def keep_objects_of_kind(yaml, kinds):
     objects = decode_yaml_stream(yaml)
@@ -92,6 +67,39 @@ def cronjob_to_job(yaml):
 
     return encode_yaml_stream(objects)
 
+def helm_with_build_cache(chart, namespace="", values=[], set=[]):
+    cache_dir = ".helm-cache"
+    
+    chart_resource = chart.replace("/", "-")
+    chart_cache_path = os.path.join(cache_dir, chart)
+    cached_yaml = os.path.join(chart_cache_path, "yaml")
+    value_flags = [fragment for value in values for fragment in ("--values", value)]
+    set_flags = [fragment for set_value in set for fragment in ("--set", set_value)]
+    command = ["./scripts/helm-with-cache.sh", cache_dir, chart, "--include-crds"]
+    if namespace:
+        command.extend(["--namespace", namespace])
+    command.extend(value_flags)
+    command.extend(set_flags)
+    
+    deps = [chart]
+    deps.extend(values)
+    agnostic_local_resource(name=chart_resource + "-helm", cmd=command, labels=["helm"], deps=deps, allow_parallel=True)
+
+    if not os.path.exists(cached_yaml):
+        agnostic_local(command)
+
+    objects = read_yaml_stream(cached_yaml)
+    if not objects:
+        agnostic_local(command)
+        objects = read_yaml_stream(cached_yaml)
+
+    watch_file(cached_yaml)
+
+    if namespace:
+        for object in objects:
+            object["metadata"]["namespace"] = namespace 
+    return encode_yaml_stream(objects)
+
 def to_hostpath_storage(yaml, use_named_volumes):
     objects = decode_yaml_stream(yaml)
     for object in objects:
@@ -110,7 +118,17 @@ def to_hostpath_storage(yaml, use_named_volumes):
             
     return encode_yaml_stream(objects)
 
-watch_file("config/values-local.yaml")
+def no_policy_server(yaml):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if object["kind"] == "ConfigMap" and object["metadata"]["name"] == "faf-lobby-server":
+            config_yaml = object["data"]["config.yaml"]
+            config_objects = decode_yaml(config_yaml)
+            config_objects["USE_POLICY_SERVER"] = False
+            config_yaml = encode_yaml(config_objects)
+            object["data"]["config.yaml"] = str(config_yaml)
+            
+    return encode_yaml_stream(objects)
 
 load("ext://git_resource", "git_checkout")
 load("ext://helm_resource", "helm_resource")
@@ -126,79 +144,99 @@ k8s_yaml(to_hostpath_storage(helm_with_build_cache("gitops-stack/cluster/storage
 helm_resource(name="traefik", chart="gitops-stack/cluster/traefik", flags=["--values=config/values-local.yaml", "--values=gitops-stack/config/local.yaml", "--values=gitops-stack/cluster/traefik/values-prod.yaml", "--create-namespace"], namespace="traefik", update_dependencies=True)
 k8s_resource(workload="traefik", port_forwards=["443:8443"], labels=["traefik"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/infra/clusterroles", namespace="faf-infra", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/infra/clusterroles", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="init-clusterrole", objects=["read-cm-secrets:clusterrole"], labels=["core"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/infra/postgres", namespace="faf-infra", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-postgres", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/infra/postgres", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-postgres", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="postgres-volume", objects=["postgres:persistentvolume", "postgres-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
 k8s_resource(workload="postgres", objects=["postgres:configmap", "postgres:secret", "postgres:service:faf-apps"], port_forwards=["5432"], resource_deps=["postgres-volume"], labels=["database"])
 agnostic_local_resource(name="setup-postgres", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-postgres.sh"], resource_deps=["postgres", "wikijs-config", "ory-hydra-config"], labels=["database"], deps=["gitops-stack/scripts/init-postgres.sh"])
 
-mariadb_yaml = helm_with_build_cache("gitops-stack/infra/mariadb", namespace="faf-infra", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"])
+mariadb_yaml = helm_with_build_cache("gitops-stack/infra/mariadb", namespace="faf-infra", values=["gitops-stack/config/local.yaml"])
 mariadb_init_user_yaml, mariadb_resource_yaml = filter_yaml(mariadb_yaml, {"app": "mariadb-sync-db-user"})
 k8s_yaml(mariadb_resource_yaml)
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-mariadb", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-mariadb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="mariadb-volume", objects=["mariadb:persistentvolume", "mariadb-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
 k8s_resource(workload="mariadb", objects=["mariadb:configmap", "mariadb:secret", "mariadb:service:faf-apps"], port_forwards=["3306"], resource_deps=["mariadb-volume"], labels=["database"])
 agnostic_local_resource(name="setup-mariadb", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-mariadb.sh"], deps=["gitops-stack/scripts/init-mariadb.sh"], resource_deps=["mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="rabbitmq-volume", objects=["rabbitmq:persistentvolume", "rabbitmq-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["rabbitmq"])
 k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap", "rabbitmq:secret"], port_forwards=["15672"], resource_deps=["rabbitmq-volume"], labels=["rabbitmq"])
 agnostic_local_resource(name="setup-rabbitmq", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-rabbitmq.sh"], deps=["gitops-stack/scripts/init-rabbitmq.sh"], resource_deps=["rabbitmq", "faf-api-config", "faf-icebreaker-config", "faf-lobby-server-config", "debezium-config", "faf-api-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["rabbitmq"])
 
-k8s_yaml(cronjob_to_job(helm_with_build_cache("gitops-stack/apps/faf-db-migrations", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"])))
+k8s_yaml(cronjob_to_job(helm_with_build_cache("gitops-stack/apps/faf-db-migrations", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])))
 k8s_resource(workload="faf-db-migrations", objects=["faf-db-migrations:secret"], resource_deps=["setup-mariadb"], labels=["database"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-voting", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+populate_db_command = ["scripts/populate-db.sh", cfg.get("test-data-path", "sql/test-data.sql")]
+agnostic_local_resource(name = "populate-db", allow_parallel = True, cmd = populate_db_command, resource_deps=["faf-db-migrations"], labels=["database"], auto_init=False)
+
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-voting", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="faf-voting-config", objects=["faf-voting:configmap", "faf-voting:secret"], labels=["voting"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-website", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/apps/faf-website/values-prod.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-website", namespace="faf-apps", values=["gitops-stack/apps/faf-website/values-prod.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="faf-website-config", objects=["faf-website:configmap", "faf-website:secret"], labels=["website"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/nodebb", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/nodebb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="nodebb-config", objects=["nodebb:configmap", "nodebb:secret"], labels=["forum"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/ergochat", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/ergochat", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="ergochat-config", objects=["ergochat:configmap", "ergochat:secret"], labels=["chat"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml", "gitops-stack/apps/faf-api/values-test.yaml"]))
+api_yaml = helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-apps", values=["gitops-stack/config/local.yaml", "gitops-stack/apps/faf-api/values-test.yaml"])
+api_yaml = patch_config(api_yaml, "faf-api", {"JWT_FAF_HYDRA_ISSUER": "http://ory-hydra:4444"})
+k8s_yaml(api_yaml)
 k8s_resource(new_name="faf-api-config", objects=["faf-api:configmap", "faf-api:secret"], labels=["api"])
 k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations"], labels=["api"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-league-service-config", objects=["faf-league-service:configmap", "faf-league-service:secret"], labels=["leagues"])
+k8s_resource(workload="faf-league-service", resource_deps=["faf-league-service-config", "setup-mariadb"], labels=["leagues"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-lobby-server", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
+lobby_server_yaml = helm_with_build_cache("gitops-stack/apps/faf-lobby-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+lobby_server_yaml = patch_config(lobby_server_yaml, "faf-lobby-server", {"HYDRA_JWKS_URI": "http://ory-hydra:4444//.well-known/jwks.json"})
+lobby_server_yaml = no_policy_server(lobby_server_yaml)
+k8s_yaml(lobby_server_yaml)
 k8s_resource(new_name="faf-lobby-server-config", objects=["faf-lobby-server:configmap", "faf-lobby-server:secret"], labels=["lobby"])
 k8s_resource(workload="faf-lobby-server", resource_deps=["faf-lobby-server-config", "faf-db-migrations"], labels=["lobby"])
 
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-policy-server", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="faf-policy-server-config", objects=["faf-policy-server:configmap", "faf-policy-server:secret"], labels=["lobby"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-replay-server", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-replay-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-replay-server-config", objects=["faf-replay-server:configmap", "faf-replay-server:secret"], labels=["replay"])
+k8s_resource(workload="faf-replay-server", port_forwards=["15001"], resource_deps=["faf-replay-server-config", "faf-db-migrations"], labels=["replay"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-user-service", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]))
+user_service_yaml = helm_with_build_cache("gitops-stack/apps/faf-user-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+user_service_yaml = patch_config(user_service_yaml, "faf-user-service", {"HYDRA_TOKEN_ISSUER": "http://ory-hydra:4444", "HYDRA_JWKS_URL": "http://ory-hydra:4444/.well-known/jwks.json", "LOBBY_URL":"ws://localhost:8003", "REPLAY_URL":"ws://localhost:15001"})
+k8s_yaml(user_service_yaml)
 k8s_resource(new_name="faf-user-service-config", objects=["faf-user-service:configmap", "faf-user-service:secret"], labels=["user"])
-k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], port_forwards=["8080"], labels=["user"])
+k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations"], port_forwards=["8080"], labels=["user"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="wordpress-config", objects=["wordpress:configmap", "wordpress:secret"], labels=["website"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wikijs", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wikijs", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="wikijs-config", objects=["wikijs:configmap", "wikijs:secret"], labels=["wiki"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/debezium", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/debezium", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="debezium-config", objects=["debezium:configmap", "debezium:secret"], labels=["database"])
 
-k8s_yaml(remove_init_container(helm_with_build_cache("gitops-stack/apps/faf-icebreaker", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"])))
-k8s_resource(new_name="faf-icebreaker-config", objects=["faf-icebreaker:configmap", "faf-icebreaker:secret"], labels=["api"])
-k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute"], labels=["api"])
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-ws-bridge", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(workload="faf-ws-bridge", objects=["faf-ws-bridge:ingressroute"], port_forwards=["8003"], resource_deps=["faf-lobby-server"], labels=["lobby"])
 
-hydra_yaml = helm_with_build_cache("gitops-stack/apps/ory-hydra", namespace="faf-apps", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"])
+icebreaker_yaml = helm_with_build_cache("gitops-stack/apps/faf-icebreaker", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+icebreaker_yaml = remove_init_container(icebreaker_yaml)
+icebreaker_yaml = patch_config(icebreaker_yaml, "faf-icebreaker", {"HYDRA_URL": "http://ory-hydra:4444"})
+k8s_yaml(icebreaker_yaml)
+k8s_resource(new_name="faf-icebreaker-config", objects=["faf-icebreaker:configmap", "faf-icebreaker:secret"], labels=["api"])
+k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute"], resource_deps=["faf-db-migrations", "setup-rabbitmq"], labels=["api"])
+
+hydra_yaml = helm_with_build_cache("gitops-stack/apps/ory-hydra", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 hydra_client_create_yaml, hydra_resources_yaml = filter_yaml(hydra_yaml, {"app": "ory-hydra-create-clients"})
+_, hydra_resources_yaml = filter_yaml(hydra_resources_yaml, {"app": "ory-hydra-janitor"})
+hydra_resources_yaml = patch_config(hydra_resources_yaml, "ory-hydra", {"URLS_SELF_ISSUER": "http://ory-hydra:4444", "URLS_SELF_PUBLIC": "http://localhost:4444", "URLS_LOGIN": "http://localhost:8080/oauth2/login", "URLS_CONSENT": "http://localhost:8080/oauth2/consent", "DEV": "true"})
 k8s_yaml(hydra_resources_yaml)
 k8s_yaml(hydra_client_create_yaml)
 k8s_resource(new_name="ory-hydra-config", objects=["ory-hydra:configmap", "ory-hydra:secret"], labels=["hydra"])
