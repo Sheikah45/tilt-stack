@@ -4,84 +4,243 @@ config.define_string("lobby-server-path", args=False, usage="Path to lobby serve
 config.define_string_list("to-run", args=True)
 cfg = config.parse()
 windows_bash_path = cfg.get("windows-bash-path", "C:\\Program Files\\Git\\bin\\bash.exe")
-if os.name == "nt" and not os.path.exists(windows_bash_path):
-    fail("Windows users need to supply a valid path to a bash executable")
-    
+data_relative_path = "data"
+if os.name == "nt":
+    if k8s_context() != "docker-desktop":
+        fail("Cannot determine data path for non docker desktop on windows")    
+    if not os.path.exists(windows_bash_path):
+        fail("Windows users need to supply a valid path to a bash executable")
+  
+    drive, path_without_drive = os.getcwd().split(":")
+    data_absolute_path = os.path.join("//run/desktop/mnt/host/", drive, path_without_drive, data_relative_path).replace("\\","/").lower()
+    use_named_volumes = ["mariadb"]
+else:
+    data_absolute_path = os.path.join(os.getcwd(), data_relative_path)
+    use_named_volumes = []
+
 def as_windows_command(command):
     if type(command) == "list":
         return [windows_bash_path, "-c"] + [" ".join(command)]
     else:
         fail("Unknown command type")
 
-    
-k8s_yaml("deploy/standard/traefik_crds.yaml")
-k8s_yaml("deploy/standard/traefik.yaml")
-k8s_resource(new_name="traefik_crds", objects=["ingressroutes.traefik.io","middlewares.traefik.io","ingressroutetcps.traefik.io","ingressrouteudps.traefik.io","middlewaretcps.traefik.io","serverstransports.traefik.io","serverstransporttcps.traefik.io","tlsoptions.traefik.io","tlsstores.traefik.io","traefikservices.traefik.io"], labels=["traefik"])
-k8s_resource(workload="traefik-deployment", objects=["traefik-ingress-controller:clusterrole","traefik-ingress-controller:clusterrolebinding","traefik-ingress-controller:serviceaccount","traefik:ingressroute"], labels=["traefik"], links=["http://traefik.localhost"])
+def agnostic_local_resource(name, cmd, **kwargs):
+    local_resource(name=name, cmd=cmd, cmd_bat=as_windows_command(cmd), **kwargs)
 
-k8s_yaml("deploy/standard/mariadb.yaml")
-setup_db_command = ["scripts/setup-db.sh"]
-local_resource(name = "setup-db", allow_parallel = True, cmd = setup_db_command, cmd_bat = as_windows_command(setup_db_command), resource_deps=["faf-db"], labels=["database"])
+def agnostic_local(cmd):
+    local(command=cmd, command_bat=as_windows_command(cmd))
+
+def patch_config(yaml, config_name, config):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if object["kind"] == "ConfigMap" and object["metadata"]["name"] == config_name:
+            object["data"].update(config)
+    
+    return encode_yaml_stream(objects)
+
+def keep_objects_of_kind(yaml, kinds):
+    objects = decode_yaml_stream(yaml)
+    return encode_yaml_stream([object for object in objects if object["kind"] in kinds])
+
+def remove_init_container(yaml):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if "spec" in object:
+            spec = object["spec"]
+            if "template" in spec:
+                template = spec["template"]
+                if "spec" in template and "initContainers" in template["spec"]:
+                    template["spec"].pop("initContainers")
+
+    return encode_yaml_stream(objects)
+
+def cronjob_to_job(yaml):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if object["kind"] == "CronJob":
+            object["kind"] = "Job"
+            spec = object["spec"]
+            spec.pop("suspend")
+            spec.pop("schedule")
+            jobTemplate = spec.pop("jobTemplate")
+            spec["template"] = jobTemplate["spec"]["template"]
+
+    return encode_yaml_stream(objects)
+
+def helm_with_build_cache(chart, namespace="", values=[], set=[]):
+    cache_dir = ".helm-cache"
+    
+    chart_resource = chart.replace("/", "-")
+    chart_cache_path = os.path.join(cache_dir, chart)
+    cached_yaml = os.path.join(chart_cache_path, "yaml")
+    value_flags = [fragment for value in values for fragment in ("--values", value)]
+    set_flags = [fragment for set_value in set for fragment in ("--set", set_value)]
+    command = ["./scripts/helm-with-cache.sh", cache_dir, chart, "--include-crds"]
+    if namespace:
+        command.extend(["--namespace", namespace])
+    command.extend(value_flags)
+    command.extend(set_flags)
+    
+    deps = [chart]
+    deps.extend(values)
+    agnostic_local_resource(name=chart_resource + "-helm", cmd=command, labels=["helm"], deps=deps, allow_parallel=True)
+
+    if not os.path.exists(cached_yaml):
+        agnostic_local(command)
+
+    objects = read_yaml_stream(cached_yaml)
+    if not objects:
+        agnostic_local(command)
+        objects = read_yaml_stream(cached_yaml)
+
+    watch_file(cached_yaml)
+
+    if namespace:
+        for object in objects:
+            object["metadata"]["namespace"] = namespace 
+    return encode_yaml_stream(objects)
+
+def to_hostpath_storage(yaml, use_named_volumes):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if object["kind"] == "PersistentVolume":
+            object["spec"].pop("nodeAffinity")
+            localpath = object["spec"].pop("local")
+            if (os.path.basename(localpath["path"]) in use_named_volumes):
+                volume_name = os.path.basename(localpath["path"])
+                localpath["path"] = volume_name
+            
+            object["spec"]["hostPath"] = localpath
+            object["spec"]["hostPath"]["type"] = "DirectoryOrCreate"
+            object["spec"]["accessModes"] = ["ReadWriteMany"]
+        if object["kind"] == "PersistentVolumeClaim":
+            object["spec"]["accessModes"] = ["ReadWriteMany"]
+            
+    return encode_yaml_stream(objects)
+
+def no_policy_server(yaml):
+    objects = decode_yaml_stream(yaml)
+    for object in objects:
+        if object["kind"] == "ConfigMap" and object["metadata"]["name"] == "faf-lobby-server":
+            config_yaml = object["data"]["config.yaml"]
+            config_objects = decode_yaml(config_yaml)
+            config_objects["USE_POLICY_SERVER"] = False
+            config_yaml = encode_yaml(config_objects)
+            object["data"]["config.yaml"] = str(config_yaml)
+            
+    return encode_yaml_stream(objects)
+
+load("ext://git_resource", "git_checkout")
+load("ext://helm_resource", "helm_resource")
+
+if not os.path.exists("gitops-stack"):
+    git_checkout("git@github.com:FAForever/gitops-stack.git", "gitops-stack")
+
+k8s_yaml("config/namespaces.yaml")
+k8s_resource(new_name="namespaces", objects=["faf-infra:namespace", "faf-apps:namespace", "faf-ops:namespace"], labels=["core"])
+
+k8s_yaml(to_hostpath_storage(helm_with_build_cache("gitops-stack/cluster/storage", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"], set=["dataPath="+data_absolute_path]), use_named_volumes=use_named_volumes))
+
+helm_resource(name="traefik", chart="gitops-stack/cluster/traefik", flags=["--values=config/values-local.yaml", "--values=gitops-stack/config/local.yaml", "--values=gitops-stack/cluster/traefik/values-prod.yaml", "--create-namespace"], namespace="traefik", update_dependencies=True)
+k8s_resource(workload="traefik", port_forwards=["443:8443"], labels=["traefik"])
+
+k8s_yaml(helm_with_build_cache("gitops-stack/infra/clusterroles", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="init-clusterrole", objects=["read-cm-secrets:clusterrole"], labels=["core"])
+
+k8s_yaml(helm_with_build_cache("gitops-stack/infra/postgres", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-postgres", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="postgres-volume", objects=["postgres:persistentvolume", "postgres-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
+k8s_resource(workload="postgres", objects=["postgres:configmap", "postgres:secret", "postgres:service:faf-apps"], port_forwards=["5432"], resource_deps=["postgres-volume"], labels=["database"])
+agnostic_local_resource(name="setup-postgres", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-postgres.sh"], resource_deps=["postgres", "wikijs-config", "ory-hydra-config"], labels=["database"], deps=["gitops-stack/scripts/init-postgres.sh"])
+
+mariadb_yaml = helm_with_build_cache("gitops-stack/infra/mariadb", namespace="faf-infra", values=["gitops-stack/config/local.yaml"])
+mariadb_init_user_yaml, mariadb_resource_yaml = filter_yaml(mariadb_yaml, {"app": "mariadb-sync-db-user"})
+k8s_yaml(mariadb_resource_yaml)
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-mariadb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="mariadb-volume", objects=["mariadb:persistentvolume", "mariadb-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["database"])
+k8s_resource(workload="mariadb", objects=["mariadb:configmap", "mariadb:secret", "mariadb:service:faf-apps"], port_forwards=["3306"], resource_deps=["mariadb-volume"], labels=["database"])
+agnostic_local_resource(name="setup-mariadb", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-mariadb.sh"], deps=["gitops-stack/scripts/init-mariadb.sh"], resource_deps=["mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
+
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="rabbitmq-volume", objects=["rabbitmq:persistentvolume", "rabbitmq-pvc:persistentvolumeclaim"], resource_deps=["namespaces"], labels=["rabbitmq"])
+k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap", "rabbitmq:secret"], port_forwards=["15672"], resource_deps=["rabbitmq-volume"], labels=["rabbitmq"])
+agnostic_local_resource(name="setup-rabbitmq", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-rabbitmq.sh"], deps=["gitops-stack/scripts/init-rabbitmq.sh"], resource_deps=["rabbitmq", "faf-api-config", "faf-icebreaker-config", "faf-lobby-server-config", "debezium-config", "faf-api-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["rabbitmq"])
+
+k8s_yaml(cronjob_to_job(helm_with_build_cache("gitops-stack/apps/faf-db-migrations", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])))
+k8s_resource(workload="faf-db-migrations", objects=["faf-db-migrations:secret"], resource_deps=["setup-mariadb"], labels=["database"])
+
 populate_db_command = ["scripts/populate-db.sh", cfg.get("test-data-path", "sql/test-data.sql")]
-local_resource(name = "populate-db", allow_parallel = True, cmd = populate_db_command, cmd_bat = as_windows_command(populate_db_command), resource_deps=["faf-db-migrate"], labels=["database"])
-populate_db_command = ["scripts/populate-coturn.sh"]
-local_resource(name = "populate-coturn", allow_parallel = True, cmd = populate_db_command, cmd_bat = as_windows_command(populate_db_command), resource_deps=["faf-ice-breaker"], labels=["database"])
-k8s_resource(workload="faf-db", objects=["mariadb:configmap"], port_forwards="3306", labels=["database"])
-k8s_resource(workload="faf-db-migrate", resource_deps=["setup-db"], labels=["database"])
+agnostic_local_resource(name = "populate-db", allow_parallel = True, cmd = populate_db_command, resource_deps=["faf-db-migrations"], labels=["database"], auto_init=False)
 
-k8s_yaml("deploy/standard/postgres.yaml")
-setup_postgres_command = ["scripts/setup-postgres.sh"]
-local_resource(name = "setup-postgres", allow_parallel = True, cmd = setup_postgres_command, cmd_bat = as_windows_command(setup_postgres_command), resource_deps=["postgres"], labels=["database"])
-k8s_resource(workload="postgres", objects=["postgres:configmap"], port_forwards="5432", labels=["database"])
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-voting", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="faf-voting-config", objects=["faf-voting:configmap", "faf-voting:secret"], labels=["voting"])
 
-k8s_yaml("deploy/standard/rabbitmq.yaml")
-setup_rabbit_command = ["scripts/setup-rabbitmq.sh"]
-local_resource(name = "setup-rabbitmq", allow_parallel = True, cmd = setup_rabbit_command, cmd_bat = as_windows_command(setup_rabbit_command), resource_deps=["rabbitmq"], labels=["messaging"])
-k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap","rabbitmq:ingressroute"], port_forwards=["5672", "15672"], resource_deps=["traefik_crds"], labels=["messaging"], links=["http://rabbitmq.localhost"])
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-website", namespace="faf-apps", values=["gitops-stack/apps/faf-website/values-prod.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="faf-website-config", objects=["faf-website:configmap", "faf-website:secret"], labels=["website"])
 
-k8s_yaml("deploy/standard/ory-hydra.yaml")
-setup_hydra_command = ["scripts/setup-hydra-clients.sh"]
-local_resource(name = "setup-hydra-clients", allow_parallel = True, cmd = setup_hydra_command, cmd_bat = as_windows_command(setup_hydra_command), resource_deps=["ory-hydra"], labels=["authentication"])
-k8s_resource(workload="ory-hydra-migrate", objects=["ory-hydra:configmap"], resource_deps=["postgres"], labels=["authentication"])
-k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], port_forwards=["4444","4445"], resource_deps=["ory-hydra-migrate","traefik_crds"], labels=["authentication"], links=["http://hydra.localhost/.well-known/openid-configuration"])
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/nodebb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="nodebb-config", objects=["nodebb:configmap", "nodebb:secret"], labels=["forum"])
 
-k8s_yaml("deploy/standard/faf-replay-server.yaml")
-k8s_resource(workload="faf-replay-server", objects=["faf-replay-server:configmap"], port_forwards=["15000"], resource_deps=["faf-db-migrate"], labels=["client"])
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/ergochat", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="ergochat-config", objects=["ergochat:configmap", "ergochat:secret"], labels=["chat"])
 
-k8s_yaml("deploy/standard/faf-user-service.yaml")
-k8s_resource(workload="faf-user-service", objects=["faf-user-service:configmap", "faf-user-service-mail-templates","faf-user-service:ingressroute"], port_forwards=["8080"], resource_deps=["setup-hydra-clients", "faf-db-migrate","traefik_crds","populate-db"], labels=["client"], links=["http://user.localhost"])
+api_yaml = helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-apps", values=["gitops-stack/config/local.yaml", "gitops-stack/apps/faf-api/values-test.yaml"])
+api_yaml = patch_config(api_yaml, "faf-api", {"JWT_FAF_HYDRA_ISSUER": "http://ory-hydra:4444"})
+k8s_yaml(api_yaml)
+k8s_resource(new_name="faf-api-config", objects=["faf-api:configmap", "faf-api:secret"], labels=["api"])
+k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations"], labels=["api"])
 
-k8s_yaml("deploy/standard/faf-api.yaml")
-k8s_resource(workload="faf-api", objects=["faf-api:configmap", "faf-api-mail-templates", "faf-api-api:ingressroute", "faf-api-web:ingressroute"], resource_deps=["faf-db-migrate", "setup-rabbitmq","traefik_crds","populate-db"], labels=["client"], links=["http://api.localhost"])
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="faf-league-service-config", objects=["faf-league-service:configmap", "faf-league-service:secret"], labels=["leagues"])
+k8s_resource(workload="faf-league-service", resource_deps=["faf-league-service-config", "setup-mariadb"], labels=["leagues"])
 
-k8s_yaml("deploy/standard/faf-ice-breaker.yaml")
-k8s_resource(workload="faf-ice-breaker", objects=["faf-ice-breaker:configmap", "faf-ice-breaker-stripprefix", "faf-ice-breaker-api:ingressroute", "faf-ice-breaker-web:ingressroute"], resource_deps=["faf-db-migrate", "ory-hydra", "setup-rabbitmq", "traefik_crds"], labels=["client"], links=["http://api.localhost/ice"])
+lobby_server_yaml = helm_with_build_cache("gitops-stack/apps/faf-lobby-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+lobby_server_yaml = patch_config(lobby_server_yaml, "faf-lobby-server", {"HYDRA_JWKS_URI": "http://ory-hydra:4444//.well-known/jwks.json"})
+lobby_server_yaml = no_policy_server(lobby_server_yaml)
+k8s_yaml(lobby_server_yaml)
+k8s_resource(new_name="faf-lobby-server-config", objects=["faf-lobby-server:configmap", "faf-lobby-server:secret"], labels=["lobby"])
+k8s_resource(workload="faf-lobby-server", resource_deps=["faf-lobby-server-config", "faf-db-migrations"], labels=["lobby"])
 
-if cfg.get("lobby-server-path"):
-    k8s_yaml("deploy/local/faf-lobby-server.yaml")
-    docker_build("local/faf-python-server", cfg.get("lobby-server-path"))
-else:
-    k8s_yaml("deploy/standard/faf-lobby-server.yaml")
-    
-k8s_resource(workload="faf-lobby-server", objects=["faf-lobby-server:configmap"], resource_deps=["faf-db-migrate", "ory-hydra", "setup-rabbitmq"], labels=["client"])
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-policy-server", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="faf-policy-server-config", objects=["faf-policy-server:configmap", "faf-policy-server:secret"], labels=["lobby"])
 
-k8s_yaml("deploy/standard/faf-ws-bridge.yaml")
-k8s_resource(workload="faf-ws-bridge", port_forwards=["8003"], labels=["client"])
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-replay-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="faf-replay-server-config", objects=["faf-replay-server:configmap", "faf-replay-server:secret"], labels=["replay"])
+k8s_resource(workload="faf-replay-server", port_forwards=["15001"], resource_deps=["faf-replay-server-config", "faf-db-migrations"], labels=["replay"])
 
-k8s_yaml("deploy/standard/faf-league-service.yaml")
-k8s_resource(workload="faf-league-service", objects=["faf-league-service:configmap"], resource_deps=["setup-db", "setup-rabbitmq"], labels=["client"])
+user_service_yaml = helm_with_build_cache("gitops-stack/apps/faf-user-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+user_service_yaml = patch_config(user_service_yaml, "faf-user-service", {"HYDRA_TOKEN_ISSUER": "http://ory-hydra:4444", "HYDRA_JWKS_URL": "http://ory-hydra:4444/.well-known/jwks.json", "LOBBY_URL":"ws://localhost:8003", "REPLAY_URL":"ws://localhost:15001"})
+k8s_yaml(user_service_yaml)
+k8s_resource(new_name="faf-user-service-config", objects=["faf-user-service:configmap", "faf-user-service:secret"], labels=["user"])
+k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations"], port_forwards=["8080"], labels=["user"])
 
-groups = {
-    "client": ["faf-api", "faf-ws-bridge", "faf-replay-server", "faf-league-service", "faf-user-service", "populate-coturn"],
-    "api": ["faf-api", "faf-user-service"]
-}
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="wordpress-config", objects=["wordpress:configmap", "wordpress:secret"], labels=["website"])
 
-resources = []
-for arg in cfg.get("to-run", []):
-  if arg in groups:
-    resources += groups[arg]
-  else:
-    # also support specifying individual services instead of groups, e.g. `tilt up a b d`
-    resources.append(arg)
-    
-config.set_enabled_resources(resources)
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wikijs", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="wikijs-config", objects=["wikijs:configmap", "wikijs:secret"], labels=["wiki"])
+
+k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/debezium", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_resource(new_name="debezium-config", objects=["debezium:configmap", "debezium:secret"], labels=["database"])
+
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-ws-bridge", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(workload="faf-ws-bridge", objects=["faf-ws-bridge:ingressroute"], port_forwards=["8003"], resource_deps=["faf-lobby-server"], labels=["lobby"])
+
+icebreaker_yaml = helm_with_build_cache("gitops-stack/apps/faf-icebreaker", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+icebreaker_yaml = remove_init_container(icebreaker_yaml)
+icebreaker_yaml = patch_config(icebreaker_yaml, "faf-icebreaker", {"HYDRA_URL": "http://ory-hydra:4444"})
+k8s_yaml(icebreaker_yaml)
+k8s_resource(new_name="faf-icebreaker-config", objects=["faf-icebreaker:configmap", "faf-icebreaker:secret"], labels=["api"])
+k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute"], resource_deps=["faf-db-migrations", "setup-rabbitmq"], labels=["api"])
+
+hydra_yaml = helm_with_build_cache("gitops-stack/apps/ory-hydra", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+hydra_client_create_yaml, hydra_resources_yaml = filter_yaml(hydra_yaml, {"app": "ory-hydra-create-clients"})
+_, hydra_resources_yaml = filter_yaml(hydra_resources_yaml, {"app": "ory-hydra-janitor"})
+hydra_resources_yaml = patch_config(hydra_resources_yaml, "ory-hydra", {"URLS_SELF_ISSUER": "http://ory-hydra:4444", "URLS_SELF_PUBLIC": "http://localhost:4444", "URLS_LOGIN": "http://localhost:8080/oauth2/login", "URLS_CONSENT": "http://localhost:8080/oauth2/consent", "DEV": "true"})
+k8s_yaml(hydra_resources_yaml)
+k8s_yaml(hydra_client_create_yaml)
+k8s_resource(new_name="ory-hydra-config", objects=["ory-hydra:configmap", "ory-hydra:secret"], labels=["hydra"])
+k8s_resource(workload="ory-hydra-migration", resource_deps=["ory-hydra-config", "setup-postgres"], labels=["hydra"])
+k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], resource_deps=["ory-hydra-migration"], port_forwards=["4444", "4445"], labels=["hydra"])
+for object in decode_yaml_stream(hydra_client_create_yaml):
+    k8s_resource(workload=object["metadata"]["name"], resource_deps=["ory-hydra"], labels=["hydra"])

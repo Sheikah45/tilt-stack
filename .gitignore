@@ -1,2 +1,5 @@
 apps/
 tilt_config.json
+gitops-stack/
+data/
+.helm-cache/

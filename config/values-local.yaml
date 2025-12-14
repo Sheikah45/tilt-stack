@@ -1,0 +1,7 @@
+zfs:
+  nodeId: ""
+  poolName: ""
+  datasetPrefix: ""
+zfs-localpv:
+  zfs:
+    bin: ""
