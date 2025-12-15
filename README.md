@@ -2,15 +2,11 @@
 This repository aims to provide a ready-to-go [Tilt](https://docs.tilt.dev/) setup for ephemeral FAF infrastructure local development on kubernetes.
 
 ## Structure
-The tilt stack uses kubernetes resources from the [gitops-stack](https://github.com/FAForever/gitops-stack). The inifisical secrets manager is
-replaced by local secrets iin the local-secrets folder. The traefik ingress controller is also currently removed
+The tilt stack uses kubernetes resources from the [gitops-stack](https://github.com/FAForever/gitops-stack).
 
 ## Configuration
-The tilt stack is designed to replicate production as close as possible for local development. The default values from gitops-stack have been =
+The tilt stack is designed to replicate production as close as possible for local development. The default values from gitops-stack have been
 used where applicable
-
-## Data
-The tilt stack is currently intended to be used transiently so there is no local storage. All the data and resources are created and destroyed with their containers.
 
 # Usage
 ## Prerequisites
