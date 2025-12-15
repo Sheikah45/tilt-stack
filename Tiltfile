@@ -102,7 +102,9 @@ def helm_with_build_cache(chart, namespace="", values=[], set=[]):
 
     if namespace:
         for object in objects:
-            object["metadata"]["namespace"] = namespace 
+            if "namespace" not in object["metadata"]:
+                object["metadata"]["namespace"] = namespace 
+
     return encode_yaml_stream(objects)
 
 def to_hostpath_storage(yaml, use_named_volumes):
@@ -143,7 +145,8 @@ if not os.path.exists("gitops-stack"):
 k8s_yaml("config/namespaces.yaml")
 k8s_yaml(helm_with_build_cache("gitops-stack/infra/clusterroles", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="namespaces", objects=["faf-infra:namespace", "faf-apps:namespace", "faf-ops:namespace"], labels=["core"])
-k8s_resource(new_name="helper-resources", objects=["init-apps:serviceaccount", "allow-init-apps-read-app-config:rolebinding", "read-cm-secrets:clusterrole"], labels=["core"])
+k8s_resource(new_name="clusterroles", objects=["read-cm-secrets:clusterrole"], labels=["core"])
+k8s_resource(new_name="init-apps", objects=["init-apps:serviceaccount", "allow-init-apps-read-app-config:rolebinding"], resource_deps=["clusterroles"], labels=["core"])
 
 storage_yaml = helm_with_build_cache("gitops-stack/cluster/storage", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"], set=["dataPath="+data_absolute_path])
 storage_yaml = to_hostpath_storage(storage_yaml, use_named_volumes=use_named_volumes)
@@ -177,17 +180,21 @@ agnostic_local_resource(name="setup-postgres", dir="gitops-stack/scripts/", allo
 
 mariadb_yaml = helm_with_build_cache("gitops-stack/infra/mariadb", namespace="faf-infra", values=["gitops-stack/config/local.yaml"])
 mariadb_init_user_yaml, mariadb_resource_yaml = filter_yaml(mariadb_yaml, {"app": "mariadb-sync-db-user"})
+k8s_yaml(mariadb_init_user_yaml)
 k8s_yaml(mariadb_resource_yaml)
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-mariadb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(workload="mariadb", objects=["mariadb:configmap", "mariadb:secret", "mariadb:service:faf-apps"], port_forwards=["3306"], resource_deps=["volumes"], labels=["database"])
-agnostic_local_resource(name="setup-mariadb", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-mariadb.sh"], deps=["gitops-stack/scripts/init-mariadb.sh"], resource_deps=["mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
+mariadb_setup_resources = []
+for object in decode_yaml_stream(mariadb_init_user_yaml):
+    mariadb_setup_resources.append(object["metadata"]["name"])
+    k8s_resource(workload=object["metadata"]["name"], resource_deps=["helper-resources", "mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap", "rabbitmq:secret"], port_forwards=["15672"], resource_deps=["volumes"], labels=["rabbitmq"])
 agnostic_local_resource(name="setup-rabbitmq", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-rabbitmq.sh"], deps=["gitops-stack/scripts/init-rabbitmq.sh"], resource_deps=["rabbitmq", "faf-api-config", "faf-icebreaker-config", "faf-lobby-server-config", "debezium-config", "faf-api-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["rabbitmq"])
 
 k8s_yaml(cronjob_to_job(helm_with_build_cache("gitops-stack/apps/faf-db-migrations", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])))
-k8s_resource(workload="faf-db-migrations", objects=["faf-db-migrations:secret"], resource_deps=["setup-mariadb"], labels=["database"])
+k8s_resource(workload="faf-db-migrations", objects=["faf-db-migrations:secret"], resource_deps=mariadb_setup_resources, labels=["database"])
 
 populate_db_command = ["scripts/populate-db.sh", cfg.get("test-data-path", "sql/test-data.sql")]
 agnostic_local_resource(name = "populate-db", allow_parallel = True, cmd = populate_db_command, resource_deps=["faf-db-migrations"], labels=["database"], auto_init=False)
@@ -212,7 +219,7 @@ k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-league-service-config", objects=["faf-league-service:configmap", "faf-league-service:secret"], labels=["leagues"])
-k8s_resource(workload="faf-league-service", resource_deps=["faf-league-service-config", "setup-mariadb", "setup-rabbitmq"], labels=["leagues"])
+k8s_resource(workload="faf-league-service", resource_deps=["faf-league-service-config", "setup-rabbitmq"] + mariadb_setup_resources, labels=["leagues"])
 
 lobby_server_yaml = helm_with_build_cache("gitops-stack/apps/faf-lobby-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 lobby_server_yaml = patch_config(lobby_server_yaml, "faf-lobby-server", {"HYDRA_JWKS_URI": "http://ory-hydra:4444//.well-known/jwks.json"})
