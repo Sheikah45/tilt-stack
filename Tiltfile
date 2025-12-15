@@ -136,7 +136,6 @@ def no_policy_server(yaml):
     return encode_yaml_stream(objects)
 
 load("ext://git_resource", "git_checkout")
-load("ext://helm_resource", "helm_resource")
 
 if not os.path.exists("gitops-stack"):
     git_checkout("git@github.com:FAForever/gitops-stack.git", "gitops-stack")
@@ -158,9 +157,18 @@ for object in decode_yaml_stream(storage_yaml):
 
 k8s_resource(new_name="volumes", objects=volume_identifiers, labels=["core"], trigger_mode=TRIGGER_MODE_MANUAL)
 
-helm_resource(name="traefik", chart="gitops-stack/cluster/traefik", flags=["--values=config/values-local.yaml", "--values=gitops-stack/config/local.yaml", "--values=gitops-stack/cluster/traefik/values-local.yaml", "--create-namespace"], namespace="traefik", update_dependencies=True)
-k8s_resource(workload="traefik", port_forwards=["443:8443"], labels=["traefik"])
+traefik_yaml = helm_with_build_cache("gitops-stack/cluster/traefik", values=["config/values-local.yaml", "gitops-stack/config/local.yaml", "gitops-stack/cluster/traefik/values-local.yaml"], namespace="traefik")
+k8s_yaml(traefik_yaml)
 
+traefik_identifiers = []
+for object in decode_yaml_stream(traefik_yaml):
+    name = object["metadata"]["name"]
+    kind = object["kind"].lower()
+    if kind != "deployment":
+        traefik_identifiers.append(name + ":" + kind)
+
+k8s_resource(new_name="traefik-setup", objects=traefik_identifiers, labels=["traefik"])
+k8s_resource(workload="release-name-traefik", new_name="traefik", port_forwards=["443:8443"], resource_deps=["traefik-setup"], labels=["traefik"])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/infra/postgres", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-postgres", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
@@ -200,7 +208,7 @@ api_yaml = helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-app
 api_yaml = patch_config(api_yaml, "faf-api", {"JWT_FAF_HYDRA_ISSUER": "http://ory-hydra:4444"})
 k8s_yaml(api_yaml)
 k8s_resource(new_name="faf-api-config", objects=["faf-api:configmap", "faf-api:secret", "faf-api-mail:configmap"], labels=["api"])
-k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations"], labels=["api"])
+k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations", "traefik"], labels=["api"])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-league-service-config", objects=["faf-league-service:configmap", "faf-league-service:secret"], labels=["leagues"])
@@ -218,13 +226,13 @@ k8s_resource(new_name="faf-policy-server-config", objects=["faf-policy-server:co
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-replay-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-replay-server-config", objects=["faf-replay-server:configmap", "faf-replay-server:secret"], labels=["replay"])
-k8s_resource(workload="faf-replay-server", objects=["faf-replay-server:ingressroute", "faf-replay-server:ingressroutetcp"], port_forwards=["15001"], resource_deps=["faf-replay-server-config", "faf-db-migrations"], labels=["replay"])
+k8s_resource(workload="faf-replay-server", objects=["faf-replay-server:ingressroute", "faf-replay-server:ingressroutetcp"], port_forwards=["15001:15001"], resource_deps=["faf-replay-server-config", "faf-db-migrations", "traefik"], labels=["replay"])
 
 user_service_yaml = helm_with_build_cache("gitops-stack/apps/faf-user-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 user_service_yaml = patch_config(user_service_yaml, "faf-user-service", {"HYDRA_TOKEN_ISSUER": "http://ory-hydra:4444", "HYDRA_JWKS_URL": "http://ory-hydra:4444/.well-known/jwks.json", "LOBBY_URL":"ws://localhost:8003", "REPLAY_URL":"ws://localhost:15001"})
 k8s_yaml(user_service_yaml)
 k8s_resource(new_name="faf-user-service-config", objects=["faf-user-service:configmap", "faf-user-service:secret", "faf-user-service-mail-templates:configmap"], labels=["user"])
-k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations"], port_forwards=["8080"], labels=["user"])
+k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations", "traefik"], port_forwards=["8080"], labels=["user"])
 
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="wordpress-config", objects=["wordpress:configmap", "wordpress:secret"], labels=["website"])
@@ -236,14 +244,14 @@ k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/debezium"
 k8s_resource(new_name="debezium-config", objects=["debezium:configmap", "debezium:secret"], labels=["database"])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-ws-bridge", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
-k8s_resource(workload="faf-ws-bridge", objects=["faf-ws-bridge:ingressroute"], port_forwards=["8003"], resource_deps=["faf-lobby-server"], labels=["lobby"])
+k8s_resource(workload="faf-ws-bridge", objects=["faf-ws-bridge:ingressroute"], port_forwards=["8003"], resource_deps=["faf-lobby-server", "traefik"], labels=["lobby"])
 
 icebreaker_yaml = helm_with_build_cache("gitops-stack/apps/faf-icebreaker", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 icebreaker_yaml = remove_init_container(icebreaker_yaml)
 icebreaker_yaml = patch_config(icebreaker_yaml, "faf-icebreaker", {"HYDRA_URL": "http://ory-hydra:4444"})
 k8s_yaml(icebreaker_yaml)
 k8s_resource(new_name="faf-icebreaker-config", objects=["faf-icebreaker:configmap", "faf-icebreaker:secret"], labels=["api"])
-k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute", "faf-icebreaker-stripprefix:middleware"], resource_deps=["faf-db-migrations", "setup-rabbitmq"], labels=["api"])
+k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute", "faf-icebreaker-stripprefix:middleware"], resource_deps=["faf-db-migrations", "setup-rabbitmq", "traefik"], labels=["api"])
 
 hydra_yaml = helm_with_build_cache("gitops-stack/apps/ory-hydra", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 hydra_client_create_yaml, hydra_resources_yaml = filter_yaml(hydra_yaml, {"app": "ory-hydra-create-clients"})
@@ -253,6 +261,6 @@ k8s_yaml(hydra_resources_yaml)
 k8s_yaml(hydra_client_create_yaml)
 k8s_resource(new_name="ory-hydra-config", objects=["ory-hydra:configmap", "ory-hydra:secret"], labels=["hydra"])
 k8s_resource(workload="ory-hydra-migration", resource_deps=["ory-hydra-config", "setup-postgres"], labels=["hydra"])
-k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], resource_deps=["ory-hydra-migration"], port_forwards=["4444", "4445"], labels=["hydra"])
+k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], resource_deps=["ory-hydra-migration", "traefik"], port_forwards=["4444", "4445"], labels=["hydra"])
 for object in decode_yaml_stream(hydra_client_create_yaml):
     k8s_resource(workload=object["metadata"]["name"], resource_deps=["ory-hydra"], labels=["hydra"])
