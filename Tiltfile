@@ -173,10 +173,16 @@ for object in decode_yaml_stream(traefik_yaml):
 k8s_resource(new_name="traefik-setup", objects=traefik_identifiers, labels=["traefik"])
 k8s_resource(workload="release-name-traefik", new_name="traefik", port_forwards=["443:8443"], resource_deps=["traefik-setup"], labels=["traefik"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/infra/postgres", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
+postgres_yaml = helm_with_build_cache("gitops-stack/infra/postgres", namespace="faf-infra", values=["gitops-stack/config/local.yaml"])
+postgres_init_user_yaml, postgres_resource_yaml = filter_yaml(postgres_yaml, {"app": "postgres-sync-db-user"})
+k8s_yaml(postgres_init_user_yaml)
+k8s_yaml(postgres_resource_yaml)
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-postgres", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(workload="postgres", objects=["postgres:configmap", "postgres:secret", "postgres:service:faf-apps"], port_forwards=["5432"], resource_deps=["volumes"], labels=["database"])
-agnostic_local_resource(name="setup-postgres", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-postgres.sh"], resource_deps=["postgres", "wikijs-config", "ory-hydra-config"], labels=["database"], deps=["gitops-stack/scripts/init-postgres.sh"])
+postgres_setup_resources = []
+for object in decode_yaml_stream(postgres_init_user_yaml):
+    postgres_setup_resources.append(object["metadata"]["name"])
+    k8s_resource(workload=object["metadata"]["name"], resource_deps=["init-apps", "postgres", "wikijs-config", "ory-hydra-config"], labels=["database"])
 
 mariadb_yaml = helm_with_build_cache("gitops-stack/infra/mariadb", namespace="faf-infra", values=["gitops-stack/config/local.yaml"])
 mariadb_init_user_yaml, mariadb_resource_yaml = filter_yaml(mariadb_yaml, {"app": "mariadb-sync-db-user"})
@@ -187,7 +193,7 @@ k8s_resource(workload="mariadb", objects=["mariadb:configmap", "mariadb:secret",
 mariadb_setup_resources = []
 for object in decode_yaml_stream(mariadb_init_user_yaml):
     mariadb_setup_resources.append(object["metadata"]["name"])
-    k8s_resource(workload=object["metadata"]["name"], resource_deps=["helper-resources", "mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
+    k8s_resource(workload=object["metadata"]["name"], resource_deps=["init-apps", "mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap", "rabbitmq:secret"], port_forwards=["15672"], resource_deps=["volumes"], labels=["rabbitmq"])
@@ -267,7 +273,7 @@ hydra_resources_yaml = patch_config(hydra_resources_yaml, "ory-hydra", {"URLS_SE
 k8s_yaml(hydra_resources_yaml)
 k8s_yaml(hydra_client_create_yaml)
 k8s_resource(new_name="ory-hydra-config", objects=["ory-hydra:configmap", "ory-hydra:secret"], labels=["hydra"])
-k8s_resource(workload="ory-hydra-migration", resource_deps=["ory-hydra-config", "setup-postgres"], labels=["hydra"])
+k8s_resource(workload="ory-hydra-migration", resource_deps=["ory-hydra-config"] + postgres_setup_resources, labels=["hydra"])
 k8s_resource(workload="ory-hydra", objects=["ory-hydra:ingressroute"], resource_deps=["ory-hydra-migration", "traefik"], port_forwards=["4444", "4445"], labels=["hydra"])
 for object in decode_yaml_stream(hydra_client_create_yaml):
     k8s_resource(workload=object["metadata"]["name"], resource_deps=["ory-hydra"], labels=["hydra"])
