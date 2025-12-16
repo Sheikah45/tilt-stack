@@ -11,7 +11,7 @@ used where applicable
 # Usage
 ## Prerequisites
 * [Tilt](https://docs.tilt.dev/install.html)
-* Kuberenetes ([Minikube](https://minikube.sigs.k8s.io/docs/) or [Docker Desktop](https://docs.docker.com/desktop/kubernetes/) are recommended for those new to kubernetes) [Tilt cluster setup](https://docs.tilt.dev/choosing_clusters)
+* Kuberenetes ([Docker Desktop](https://docs.docker.com/desktop/kubernetes/) or [Minikube](https://minikube.sigs.k8s.io/docs/) are recommended for those new to kubernetes) [Tilt cluster setup](https://docs.tilt.dev/choosing_clusters)
 * For windows users a bash program. By default git bash is used with an assumed installation directory of C:/Program Files/Git
 * [helm](https://helm.sh/docs/intro/install/) must be installed to generate the k8s from the helm charts in the gitops repo
 
