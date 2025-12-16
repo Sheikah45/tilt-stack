@@ -146,7 +146,7 @@ k8s_yaml("config/namespaces.yaml")
 k8s_yaml(helm_with_build_cache("gitops-stack/infra/clusterroles", namespace="faf-infra", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="namespaces", objects=["faf-infra:namespace", "faf-apps:namespace", "faf-ops:namespace"], labels=["core"])
 k8s_resource(new_name="clusterroles", objects=["read-cm-secrets:clusterrole"], labels=["core"])
-k8s_resource(new_name="init-apps", objects=["init-apps:serviceaccount", "allow-init-apps-read-app-config:rolebinding"], resource_deps=["clusterroles"], labels=["core"])
+k8s_resource(new_name="init-apps", objects=["init-apps:serviceaccount:faf-infra", "init-apps:serviceaccount:faf-apps", "allow-init-apps-read-app-config-infra:rolebinding", "allow-init-apps-read-app-config-apps:rolebinding"], resource_deps=["clusterroles"], labels=["core"])
 
 storage_yaml = helm_with_build_cache("gitops-stack/cluster/storage", values=["config/values-local.yaml", "gitops-stack/config/local.yaml"], set=["dataPath="+data_absolute_path])
 storage_yaml = to_hostpath_storage(storage_yaml, use_named_volumes=use_named_volumes)
@@ -195,9 +195,15 @@ for object in decode_yaml_stream(mariadb_init_user_yaml):
     mariadb_setup_resources.append(object["metadata"]["name"])
     k8s_resource(workload=object["metadata"]["name"], resource_deps=["init-apps", "mariadb", "faf-api-config", "faf-user-service-config", "faf-lobby-server-config", "faf-replay-server-config", "faf-policy-server-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["database"])
 
-k8s_yaml(helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+rabbitmq_yaml = helm_with_build_cache("gitops-stack/apps/rabbitmq", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
+rabbitmq_init_user_yaml, rabbitmq_resource_yaml = filter_yaml(rabbitmq_yaml, {"app": "rabbitmq-sync-user"})
+k8s_yaml(rabbitmq_init_user_yaml)
+k8s_yaml(rabbitmq_resource_yaml)
 k8s_resource(workload="rabbitmq", objects=["rabbitmq:configmap", "rabbitmq:secret"], port_forwards=["15672"], resource_deps=["volumes"], labels=["rabbitmq"])
-agnostic_local_resource(name="setup-rabbitmq", dir="gitops-stack/scripts/", allow_parallel=True, cmd=["./init-rabbitmq.sh"], deps=["gitops-stack/scripts/init-rabbitmq.sh"], resource_deps=["rabbitmq", "faf-api-config", "faf-icebreaker-config", "faf-lobby-server-config", "debezium-config", "faf-api-config", "faf-league-service-config", "wordpress-config", "ergochat-config"], labels=["rabbitmq"])
+rabbitmq_setup_resources = []
+for object in decode_yaml_stream(rabbitmq_init_user_yaml):
+    rabbitmq_setup_resources.append(object["metadata"]["name"])
+    k8s_resource(workload=object["metadata"]["name"], resource_deps=["init-apps", "rabbitmq", "faf-api-config", "faf-icebreaker-config", "faf-lobby-server-config", "debezium-config", "faf-league-service-config"], labels=["rabbitmq"])
 
 k8s_yaml(cronjob_to_job(helm_with_build_cache("gitops-stack/apps/faf-db-migrations", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])))
 k8s_resource(workload="faf-db-migrations", objects=["faf-db-migrations:secret"], resource_deps=mariadb_setup_resources, labels=["database"])
@@ -221,18 +227,18 @@ api_yaml = helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-app
 api_yaml = patch_config(api_yaml, "faf-api", {"JWT_FAF_HYDRA_ISSUER": "http://ory-hydra:4444"})
 k8s_yaml(api_yaml)
 k8s_resource(new_name="faf-api-config", objects=["faf-api:configmap", "faf-api:secret", "faf-api-mail:configmap"], labels=["api"])
-k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations", "traefik"], labels=["api"])
+k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations", "traefik", "ory-hydra"] + rabbitmq_setup_resources, labels=["api"])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-league-service-config", objects=["faf-league-service:configmap", "faf-league-service:secret"], labels=["leagues"])
-k8s_resource(workload="faf-league-service", resource_deps=["faf-league-service-config", "setup-rabbitmq"] + mariadb_setup_resources, labels=["leagues"])
+k8s_resource(workload="faf-league-service", resource_deps=["faf-league-service-config"] + mariadb_setup_resources + rabbitmq_setup_resources, labels=["leagues"])
 
 lobby_server_yaml = helm_with_build_cache("gitops-stack/apps/faf-lobby-server", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 lobby_server_yaml = patch_config(lobby_server_yaml, "faf-lobby-server", {"HYDRA_JWKS_URI": "http://ory-hydra:4444//.well-known/jwks.json"})
 lobby_server_yaml = no_policy_server(lobby_server_yaml)
 k8s_yaml(lobby_server_yaml)
 k8s_resource(new_name="faf-lobby-server-config", objects=["faf-lobby-server:configmap", "faf-lobby-server:secret"], labels=["lobby"])
-k8s_resource(workload="faf-lobby-server", resource_deps=["faf-lobby-server-config", "faf-db-migrations"], labels=["lobby"])
+k8s_resource(workload="faf-lobby-server", resource_deps=["faf-lobby-server-config", "faf-db-migrations", "ory-hydra"], labels=["lobby"])
 
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-policy-server", namespace="faf-apps", values=["config/values-local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="faf-policy-server-config", objects=["faf-policy-server:configmap", "faf-policy-server:secret"], labels=["lobby"])
@@ -245,7 +251,7 @@ user_service_yaml = helm_with_build_cache("gitops-stack/apps/faf-user-service", 
 user_service_yaml = patch_config(user_service_yaml, "faf-user-service", {"HYDRA_TOKEN_ISSUER": "http://ory-hydra:4444", "HYDRA_JWKS_URL": "http://ory-hydra:4444/.well-known/jwks.json", "LOBBY_URL":"ws://localhost:8003", "REPLAY_URL":"ws://localhost:15001"})
 k8s_yaml(user_service_yaml)
 k8s_resource(new_name="faf-user-service-config", objects=["faf-user-service:configmap", "faf-user-service:secret", "faf-user-service-mail-templates:configmap"], labels=["user"])
-k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations", "traefik"], port_forwards=["8080"], labels=["user"])
+k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations", "traefik", "ory-hydra"], port_forwards=["8080"], labels=["user"])
 
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="wordpress-config", objects=["wordpress:configmap", "wordpress:secret"], labels=["website"])
@@ -264,7 +270,7 @@ icebreaker_yaml = remove_init_container(icebreaker_yaml)
 icebreaker_yaml = patch_config(icebreaker_yaml, "faf-icebreaker", {"HYDRA_URL": "http://ory-hydra:4444"})
 k8s_yaml(icebreaker_yaml)
 k8s_resource(new_name="faf-icebreaker-config", objects=["faf-icebreaker:configmap", "faf-icebreaker:secret"], labels=["api"])
-k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute", "faf-icebreaker-stripprefix:middleware"], resource_deps=["faf-db-migrations", "setup-rabbitmq", "traefik"], labels=["api"])
+k8s_resource(workload="faf-icebreaker", objects=["faf-icebreaker:ingressroute", "faf-icebreaker-stripprefix:middleware"], resource_deps=["faf-db-migrations", "traefik", "ory-hydra"] + rabbitmq_setup_resources, labels=["api"])
 
 hydra_yaml = helm_with_build_cache("gitops-stack/apps/ory-hydra", namespace="faf-apps", values=["gitops-stack/config/local.yaml"])
 hydra_client_create_yaml, hydra_resources_yaml = filter_yaml(hydra_yaml, {"app": "ory-hydra-create-clients"})
