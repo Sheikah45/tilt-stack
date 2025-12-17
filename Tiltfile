@@ -225,8 +225,9 @@ k8s_resource(workload="faf-website", objects=["faf-website:ingressroute"], resou
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/nodebb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="nodebb-config", objects=["nodebb:configmap", "nodebb:secret"], labels=["forum"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/ergochat", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/ergochat", namespace="faf-apps", values=["gitops-stack/config/local.yaml"], set=["baseDomain=chat.localhost"]))
 k8s_resource(new_name="ergochat-config", objects=["ergochat:configmap", "ergochat:secret"], labels=["chat"])
+k8s_resource(workload="ergochat", objects=["ergochat-webirc:ingressroute"], resource_deps=["traefik"], port_forwards=["8097:8097"], labels=["chat"])
 
 api_yaml = helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-apps", values=["gitops-stack/config/local.yaml", "gitops-stack/apps/faf-api/values-test.yaml"])
 api_yaml = patch_config(api_yaml, "faf-api", {"JWT_FAF_HYDRA_ISSUER": "http://ory-hydra:4444"})
