@@ -214,8 +214,13 @@ agnostic_local_resource(name = "populate-db", allow_parallel = True, cmd = popul
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-voting", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="faf-voting-config", objects=["faf-voting:configmap", "faf-voting:secret"], labels=["voting"])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/faf-website", namespace="faf-apps", values=["gitops-stack/apps/faf-website/values-prod.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-website", namespace="faf-apps", values=["gitops-stack/config/local.yaml", "gitops-stack/apps/faf-website/values-prod.yaml"]))
 k8s_resource(new_name="faf-website-config", objects=["faf-website:configmap", "faf-website:secret"], labels=["website"])
+k8s_resource(workload="faf-website", objects=["faf-website:ingressroute"], resource_deps=["traefik"], labels=["website"], links=[link("https://www.localhost", "FAForever Website")])
+
+# k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-content", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+# k8s_resource(new_name="faf-content-config", objects=["faf-content:configmap"], labels=["content"])
+# k8s_resource(workload="faf-content", objects=["faf-content:ingressroute", "cors:middleware", "redirect-replay-subdomain:middleware"], resource_deps=["traefik"], labels=["content"], links=[link("https://content.localhost", "FAForever Content")])
 
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/nodebb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="nodebb-config", objects=["nodebb:configmap", "nodebb:secret"], labels=["forum"])
@@ -227,7 +232,7 @@ api_yaml = helm_with_build_cache("gitops-stack/apps/faf-api", namespace="faf-app
 api_yaml = patch_config(api_yaml, "faf-api", {"JWT_FAF_HYDRA_ISSUER": "http://ory-hydra:4444"})
 k8s_yaml(api_yaml)
 k8s_resource(new_name="faf-api-config", objects=["faf-api:configmap", "faf-api:secret", "faf-api-mail:configmap"], labels=["api"])
-k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations", "traefik", "ory-hydra"] + rabbitmq_setup_resources, labels=["api"])
+k8s_resource(workload="faf-api", objects=["faf-api:ingressroute"], port_forwards=["8010"], resource_deps=["faf-api-config", "faf-db-migrations", "traefik", "ory-hydra"] + rabbitmq_setup_resources, labels=["api"], links=[link("https://api.localhost", "FAF API")])
 
 k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-league-service", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="faf-league-service-config", objects=["faf-league-service:configmap", "faf-league-service:secret"], labels=["leagues"])
@@ -251,13 +256,19 @@ user_service_yaml = helm_with_build_cache("gitops-stack/apps/faf-user-service", 
 user_service_yaml = patch_config(user_service_yaml, "faf-user-service", {"HYDRA_TOKEN_ISSUER": "http://ory-hydra:4444", "HYDRA_JWKS_URL": "http://ory-hydra:4444/.well-known/jwks.json", "LOBBY_URL":"ws://localhost:8003", "REPLAY_URL":"ws://localhost:15001"})
 k8s_yaml(user_service_yaml)
 k8s_resource(new_name="faf-user-service-config", objects=["faf-user-service:configmap", "faf-user-service:secret", "faf-user-service-mail-templates:configmap"], labels=["user"])
-k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations", "traefik", "ory-hydra"], port_forwards=["8080"], labels=["user"])
+k8s_resource(workload="faf-user-service", objects=["faf-user-service:ingressroute"], resource_deps=["faf-db-migrations", "traefik", "ory-hydra"], port_forwards=["8080"], labels=["user"], links=[link("https://user.localhost/register", "User Service Registration")])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/wordpress", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="wordpress-config", objects=["wordpress:configmap", "wordpress:secret"], labels=["website"])
+k8s_resource(workload="wordpress", objects=["wordpress:ingressroute"], resource_deps=["traefik"], labels=["website"], links=[link("https://direct.localhost", "FAF Wordpress")])
 
-k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/wikijs", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/wikijs", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
 k8s_resource(new_name="wikijs-config", objects=["wikijs:configmap", "wikijs:secret", "wikijs-sso:configmap"], labels=["wiki"])
+k8s_resource(workload="wikijs", objects=["wikijs:ingressroute"], resource_deps=["traefik"], labels=["wiki"], links=[link("https://wiki.localhost", "FAF Wiki")])
+
+k8s_yaml(helm_with_build_cache("gitops-stack/apps/faf-unitdb", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]))
+k8s_resource(new_name="faf-unitdb-config", objects=["faf-unitdb:configmap", "faf-unitdb:secret"], labels=["unitdb"])
+k8s_resource(workload="faf-unitdb", objects=["faf-unitdb:ingressroute"], resource_deps=["traefik"], labels=["unitdb"], links=[link("https://unitdb.localhost", "Rackover UnitDB")])
 
 k8s_yaml(keep_objects_of_kind(helm_with_build_cache("gitops-stack/apps/debezium", namespace="faf-apps", values=["gitops-stack/config/local.yaml"]), kinds=["ConfigMap", "Secret"]))
 k8s_resource(new_name="debezium-config", objects=["debezium:configmap", "debezium:secret"], labels=["database"])
