@@ -1,3 +1,6 @@
+# Archived
+This repository is now archived and has been merged with the [gitops-stack](https://github.com/FAForever/gitops-stack) for direct local development and easier maintenance.
+
 # Tilt Stack
 This repository aims to provide a ready-to-go [Tilt](https://docs.tilt.dev/) setup for ephemeral FAF infrastructure local development on kubernetes.
 
